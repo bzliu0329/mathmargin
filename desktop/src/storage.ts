@@ -1,8 +1,8 @@
 import type { AnnotationRecord, DocumentRecord } from "../../lib/types";
 
-export type LocalDocument = DocumentRecord & { file: Blob };
+export type LocalDocument = DocumentRecord & { file: ArrayBuffer | Blob };
 
-const DB_NAME = "mathmargin-desktop";
+const DB_NAME = "mathmargin-desktop-v2";
 const DB_VERSION = 1;
 
 function openDatabase() {

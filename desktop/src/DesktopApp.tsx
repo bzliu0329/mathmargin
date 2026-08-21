@@ -50,22 +50,26 @@ function DesktopLibrary({ onOpen }: { onOpen: (id: string) => void }) {
     if (file.size > MAX_PDF_SIZE) return setError("This PDF is larger than the 75 MB limit.");
     if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) return setError("Choose a PDF file to continue.");
     setUploading(true);
+    let stage = "reading the file";
     try {
       const data = await file.arrayBuffer();
+      stage = "validating the PDF";
       const task = pdfjs.getDocument({ data: data.slice(0) });
       const pdf = await task.promise;
       const now = new Date().toISOString();
       const record: LocalDocument = {
         id: crypto.randomUUID(), title: file.name.replace(/\.pdf$/i, ""), originalFilename: file.name,
         fileSize: file.size, pageCount: pdf.numPages, createdAt: now, updatedAt: now, lastOpenedAt: now,
-        file: new Blob([data], { type: "application/pdf" }),
+        file: data,
       };
+      stage = "closing the PDF validator";
       await pdf.destroy();
+      stage = "saving the PDF locally";
       await putDocument(record);
       setDocuments((current) => [record, ...current]);
     } catch (cause) {
       const detail = message(cause, "This PDF could not be read.");
-      setError(/password/i.test(detail) ? "Password-protected PDFs are not supported yet." : /invalid|format|missing pdf/i.test(detail) ? "This PDF appears to be corrupted or invalid." : detail);
+      setError(/password/i.test(detail) ? "Password-protected PDFs are not supported yet." : /invalid|format|missing pdf/i.test(detail) ? "This PDF appears to be corrupted or invalid." : `${detail} (${stage})`);
     } finally { setUploading(false); if (inputRef.current) inputRef.current.value = ""; }
   }
 
@@ -122,7 +126,7 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
     }).catch((cause) => setError(message(cause, "This textbook could not be opened."))).finally(() => setLoading(false));
   }, [documentId]);
   useEffect(() => () => saveTimers.current.forEach(clearTimeout), []);
-  const pdfUrl = useMemo(() => document ? URL.createObjectURL(document.file) : "", [document]);
+  const pdfUrl = useMemo(() => document ? URL.createObjectURL(document.file instanceof Blob ? document.file : new Blob([document.file], { type: "application/pdf" })) : "", [document]);
   useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
 
   const save = useCallback(async (annotation: AnnotationRecord) => {
