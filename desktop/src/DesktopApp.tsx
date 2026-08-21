@@ -4,11 +4,20 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import katex from "katex";
+import "katex/contrib/mhchem/mhchem.js";
 import type { AnnotationColor, AnnotationGeometry, AnnotationRecord, NormalizedRect } from "../../lib/types";
 import { ANNOTATION_COLORS, MAX_PDF_SIZE } from "../../lib/types";
 import { getDocument, listAnnotations, listDocuments, putAnnotation, putDocument, removeAnnotation, removeDocument, type LocalDocument } from "./storage";
+import { handleLatexSuiteKey, LATEX_SUITE_SHORTCUT_COUNT, reconcileLatexTabState, type LatexEditorOperation, type LatexTabState } from "./latexSuite";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+
+const KATEX_MACROS = {
+  "\\bra": "\\left\\langle #1 \\right|",
+  "\\ket": "\\left| #1 \\right\\rangle",
+  "\\braket": "\\left\\langle #1 \\right\\rangle",
+  "\\hom": "\\operatorname{hom}",
+};
 
 function clamp(value: number, min = 0, max = 1) { return Math.min(max, Math.max(min, value)); }
 function isTextGeometry(value: AnnotationGeometry): value is { rects: NormalizedRect[] } { return "rects" in value; }
@@ -18,7 +27,7 @@ function mathError(markdown: string) {
   try {
     const blocks = [...markdown.matchAll(/\$\$([\s\S]*?)\$\$/g)].map((match) => match[1]);
     const inline = [...markdown.replace(/\$\$[\s\S]*?\$\$/g, "").matchAll(/(^|[^\\])\$([^\n$]+?)\$/g)].map((match) => match[2]);
-    for (const expression of [...blocks, ...inline]) katex.renderToString(expression, { throwOnError: true });
+    for (const expression of [...blocks, ...inline]) katex.renderToString(expression, { throwOnError: true, macros: KATEX_MACROS });
     return "";
   } catch (error) { return message(error, "This equation has a LaTeX error.").replace(/^KaTeX parse error:\s*/i, ""); }
 }
@@ -115,8 +124,10 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const pageRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
   const drawStart = useRef<{ x: number; y: number } | null>(null);
   const saveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const latexTabState = useRef<LatexTabState>(null);
 
   useEffect(() => {
     Promise.all([getDocument(documentId), listAnnotations(documentId)]).then(async ([record, saved]) => {
@@ -126,6 +137,7 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
     }).catch((cause) => setError(message(cause, "This textbook could not be opened."))).finally(() => setLoading(false));
   }, [documentId]);
   useEffect(() => () => saveTimers.current.forEach(clearTimeout), []);
+  useEffect(() => { latexTabState.current = null; }, [selectedId]);
   const pdfUrl = useMemo(() => document ? URL.createObjectURL(document.file instanceof Blob ? document.file : new Blob([document.file], { type: "application/pdf" })) : "", [document]);
   useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
 
@@ -149,6 +161,41 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
     setAnnotations((current) => [...current, annotation]); setSelectedId(annotation.id); setSidebarOpen(true); await save(annotation);
   }
   async function discard(id: string) { await removeAnnotation(id); setAnnotations((current) => current.filter((item) => item.id !== id)); setSelectedId(""); }
+
+  function applyLatexOperation(operation: LatexEditorOperation) {
+    if (!selectedId) return;
+    latexTabState.current = operation.tabState;
+    update(selectedId, { bodyMarkdown: operation.value });
+    requestAnimationFrame(() => {
+      editorRef.current?.focus();
+      editorRef.current?.setSelectionRange(operation.selectionStart, operation.selectionEnd);
+    });
+  }
+
+  function editNote(value: string) {
+    if (!selected) return;
+    latexTabState.current = reconcileLatexTabState(latexTabState.current, selected.bodyMarkdown, value);
+    update(selected.id, { bodyMarkdown: value });
+  }
+
+  function useLatexShortcut(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (!selected) return;
+    const target = event.currentTarget;
+    const operation = handleLatexSuiteKey({
+      value: selected.bodyMarkdown,
+      selectionStart: target.selectionStart,
+      selectionEnd: target.selectionEnd,
+      key: event.key,
+      shiftKey: event.shiftKey,
+      ctrlKey: event.ctrlKey || event.metaKey,
+      altKey: event.altKey,
+      composing: event.nativeEvent.isComposing,
+      tabState: latexTabState.current,
+    });
+    if (!operation) return;
+    event.preventDefault();
+    applyLatexOperation(operation);
+  }
 
   function selectText() {
     if (tool !== "highlight" || !pageRef.current) return;
@@ -176,7 +223,7 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
       <div className="annotation-layer">{pageAnnotations.flatMap((annotation) => (isTextGeometry(annotation.geometry) ? annotation.geometry.rects : [annotation.geometry]).map((rect, index) => <button key={`${annotation.id}-${index}`} className={`annotation-mark ${annotation.type} color-${annotation.color} ${selectedId === annotation.id ? "selected" : ""}`} style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }} onClick={() => { setSelectedId(annotation.id); setSidebarOpen(true); }} />))}</div>
       {tool === "area" && <div className="area-interaction" onPointerDown={beginArea} onPointerMove={moveArea} onPointerUp={endArea}>{draftArea && <div className="draft-area" style={{ left: `${draftArea.x * 100}%`, top: `${draftArea.y * 100}%`, width: `${draftArea.width * 100}%`, height: `${draftArea.height * 100}%` }}>{draftArea.width >= .015 && draftArea.height >= .015 && <div className="draft-actions"><button onClick={() => { create("area", draftArea); setDraftArea(null); }}>Annotate area</button><button onClick={() => setDraftArea(null)}>Cancel</button></div>}</div>}</div>}
     </div></Document>{error && <div className="reader-toast"><span>!</span>{error}<button onClick={() => setError("")}>×</button></div>}</section>
-    <aside className="notes-panel"><div className="notes-header"><div><p className="eyebrow">Local notebook</p><h2>Annotations</h2></div><button onClick={() => setSidebarOpen(false)}>×</button></div>{selected ? <div className="note-editor"><button className="back-to-notes" onClick={() => setSelectedId("")}>← All annotations</button><div className="note-meta"><span>{selected.type === "text" ? "Highlighted text" : "Selected area"}</span><button onClick={() => setPageNumber(selected.pageNumber)}>Page {selected.pageNumber}</button></div>{selected.selectedText && <blockquote>“{selected.selectedText}”</blockquote>}<div className="color-row"><span>Marker</span>{ANNOTATION_COLORS.map((color) => <button key={color} className={`color-dot ${color} ${selected.color === color ? "active" : ""}`} onClick={() => update(selected.id, { color: color as AnnotationColor })} />)}</div><label className="editor-label">Your note <span>Markdown + LaTeX</span></label><textarea value={selected.bodyMarkdown} onChange={(event) => update(selected.id, { bodyMarkdown: event.target.value })} placeholder={"Write your reasoning…\n\nUse $x^2$ for inline math or:\n$$\\int_a^b f(x)\\,dx$$"} />{latexError && <div className="latex-error"><strong>LaTeX needs attention</strong>{latexError}</div>}<div className="preview-label">Rendered preview</div><div className={`note-preview ${!selected.bodyMarkdown ? "empty" : ""}`}>{selected.bodyMarkdown ? <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{selected.bodyMarkdown}</ReactMarkdown> : <span>Your formatted note will appear here.</span>}</div><div className="editor-footer"><span>{selected.bodyMarkdown.length.toLocaleString()} characters</span><button className="delete-note" onClick={() => discard(selected.id)}>Delete annotation</button></div></div> : <div className="notes-list">{annotations.length ? annotations.map((annotation) => <button className="note-card" key={annotation.id} onClick={() => { setSelectedId(annotation.id); setPageNumber(annotation.pageNumber); }}><span className={`note-stripe ${annotation.color}`} /><span className="note-card-copy"><span className="note-card-meta">Page {annotation.pageNumber} · {annotation.type}</span><strong>{annotation.bodyMarkdown || annotation.selectedText || "Untitled annotation"}</strong></span><span>→</span></button>) : <div className="notes-empty"><div>∴</div><h3>No annotations yet</h3><p>Select text or draw an area on the page. Your note will open here.</p></div>}</div>}</aside>
+    <aside className="notes-panel"><div className="notes-header"><div><p className="eyebrow">Local notebook</p><h2>Annotations</h2></div><button onClick={() => setSidebarOpen(false)}>×</button></div>{selected ? <div className="note-editor"><button className="back-to-notes" onClick={() => setSelectedId("")}>← All annotations</button><div className="note-meta"><span>{selected.type === "text" ? "Highlighted text" : "Selected area"}</span><button onClick={() => setPageNumber(selected.pageNumber)}>Page {selected.pageNumber}</button></div>{selected.selectedText && <blockquote>“{selected.selectedText}”</blockquote>}<div className="color-row"><span>Marker</span>{ANNOTATION_COLORS.map((color) => <button key={color} className={`color-dot ${color} ${selected.color === color ? "active" : ""}`} onClick={() => update(selected.id, { color: color as AnnotationColor })} />)}</div><label className="editor-label">Your note <span>Markdown + LaTeX</span></label><div className="latex-suite-status" title="Your active Obsidian LaTeX Suite snippet set is enabled. Automatic snippets expand as you type; press Tab for manual snippets and placeholder navigation."><span>⌨</span> LaTeX Suite · {LATEX_SUITE_SHORTCUT_COUNT} shortcuts · Tab to expand</div><textarea ref={editorRef} value={selected.bodyMarkdown} onChange={(event) => editNote(event.target.value)} onKeyDown={useLatexShortcut} placeholder={"Write your reasoning…\n\nType mk for inline math or dm for display math.\nInside math, try @a, RR, //, pmat, or iden3."} />{latexError && <div className="latex-error"><strong>LaTeX needs attention</strong>{latexError}</div>}<div className="preview-label">Rendered preview</div><div className={`note-preview ${!selected.bodyMarkdown ? "empty" : ""}`}>{selected.bodyMarkdown ? <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeKatex, { macros: KATEX_MACROS }]]}>{selected.bodyMarkdown}</ReactMarkdown> : <span>Your formatted note will appear here.</span>}</div><div className="editor-footer"><span>{selected.bodyMarkdown.length.toLocaleString()} characters</span><button className="delete-note" onClick={() => discard(selected.id)}>Delete annotation</button></div></div> : <div className="notes-list">{annotations.length ? annotations.map((annotation) => <button className="note-card" key={annotation.id} onClick={() => { setSelectedId(annotation.id); setPageNumber(annotation.pageNumber); }}><span className={`note-stripe ${annotation.color}`} /><span className="note-card-copy"><span className="note-card-meta">Page {annotation.pageNumber} · {annotation.type}</span><strong>{annotation.bodyMarkdown || annotation.selectedText || "Untitled annotation"}</strong></span><span>→</span></button>) : <div className="notes-empty"><div>∴</div><h3>No annotations yet</h3><p>Select text or draw an area on the page. Your note will open here.</p></div>}</div>}</aside>
     </div>
   </main>;
 }

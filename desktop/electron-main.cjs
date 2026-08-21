@@ -60,6 +60,35 @@ async function runUploadSmokeTest(window) {
         if (!document.querySelector(".pdf-page-wrap canvas")) {
           return { ok: false, uploaded: true, error: "The saved PDF did not render within 10 seconds." };
         }
+        const textSpan = document.querySelector(".react-pdf__Page__textContent span");
+        if (!textSpan) return { ok: false, uploaded: true, rendered: true, error: "The PDF text layer was not rendered." };
+        const range = document.createRange();
+        range.selectNodeContents(textSpan);
+        const selection = getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        document.querySelector(".pdf-page-wrap")?.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+        const editorStartedAt = Date.now();
+        while (!document.querySelector(".note-editor textarea") && Date.now() - editorStartedAt < 5000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        const editor = document.querySelector(".note-editor textarea");
+        if (!editor) return { ok: false, uploaded: true, rendered: true, error: "A text annotation could not be created." };
+        const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+        valueSetter?.call(editor, "m");
+        editor.dispatchEvent(new Event("input", { bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 100));
+        editor.setSelectionRange(1, 1);
+        editor.dispatchEvent(new KeyboardEvent("keydown", { key: "k", bubbles: true, cancelable: true }));
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (editor.value !== "$$") return { ok: false, uploaded: true, rendered: true, error: "The mk shortcut produced " + JSON.stringify(editor.value) + "." };
+        valueSetter?.call(editor, "$@$");
+        editor.dispatchEvent(new Event("input", { bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 100));
+        editor.setSelectionRange(2, 2);
+        editor.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (editor.value !== "$\\\\alpha$") return { ok: false, uploaded: true, rendered: true, error: "The @a shortcut produced " + JSON.stringify(editor.value) + "." };
         location.hash = "";
         const libraryStartedAt = Date.now();
         while (!document.querySelector(".desktop-library") && Date.now() - libraryStartedAt < 5000) {
@@ -74,7 +103,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, shortcuts: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
