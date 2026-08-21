@@ -138,6 +138,16 @@ async function runUploadSmokeTest(window) {
         if (preview.scrollHeight <= preview.clientHeight || preview.scrollTop <= 0 || getComputedStyle(preview).overflowY !== "auto" || getComputedStyle(preview).resize !== "vertical") {
           return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, error: "A long rendered preview was not independently scrollable and vertically resizable." };
         }
+        document.querySelector(".back-to-notes")?.click();
+        const structureStartedAt = Date.now();
+        while (!document.querySelector(".annotation-chapter-heading") && Date.now() - structureStartedAt < 10000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        if (!document.querySelector(".annotation-chapter-heading") || !document.querySelector(".annotation-section-heading") || !document.querySelector(".notes-list .note-card")) {
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, error: "All annotations were not grouped into a chapter and section." };
+        }
+        const detectedChapterTitle = document.querySelector(".annotation-chapter-heading strong")?.textContent?.trim();
+        const detectedSectionTitle = document.querySelector(".annotation-section-heading > span")?.textContent?.trim();
         [...document.querySelectorAll(".tool-group button")].find(button => button.textContent?.includes("Area"))?.click();
         document.querySelector(".notes-header > button")?.click();
         await new Promise(resolve => setTimeout(resolve, 400));
@@ -163,7 +173,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, chapterGrouping: true, detectedChapterTitle, detectedSectionTitle, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }

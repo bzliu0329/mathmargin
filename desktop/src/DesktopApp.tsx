@@ -5,10 +5,11 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import katex from "katex";
 import "katex/contrib/mhchem/mhchem.js";
-import type { AnnotationColor, AnnotationGeometry, AnnotationRecord, NormalizedRect } from "../../lib/types";
+import type { AnnotationColor, AnnotationGeometry, AnnotationRecord, BookStructureEntry, NormalizedRect } from "../../lib/types";
 import { ANNOTATION_COLORS, MAX_PDF_SIZE } from "../../lib/types";
 import { getDocument, listAnnotations, listDocuments, putAnnotation, putDocument, removeAnnotation, removeDocument, type LocalDocument } from "./storage";
 import { handleLatexSuiteKey, LATEX_SUITE_SHORTCUT_COUNT, reconcileLatexTabState, type LatexEditorOperation, type LatexTabState } from "./latexSuite";
+import { extractBookStructure } from "./bookStructure";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 
@@ -50,6 +51,35 @@ function normalizeDisplayMath(markdown: string) {
     cursor = index + match[0].length;
   }
   return result + normalizeProse(markdown.slice(cursor));
+}
+
+function groupAnnotationsByStructure(annotations: AnnotationRecord[], structure: BookStructureEntry[]) {
+  type SectionGroup = { key: string; title: string; annotations: AnnotationRecord[] };
+  type ChapterGroup = { key: string; title: string; sections: SectionGroup[] };
+  const chapters: ChapterGroup[] = [];
+  const orderedStructure = [...structure].sort((a, b) => a.pageNumber - b.pageNumber || a.level - b.level);
+
+  for (const annotation of annotations) {
+    let chapterTitle = structure.length ? "Front matter" : "Book notes";
+    let chapterKey = structure.length ? "front-matter" : "book-notes";
+    let sectionTitle = structure.length ? "General notes" : "Pages";
+    let sectionKey = `${chapterKey}-general`;
+    for (const entry of orderedStructure) {
+      if (entry.pageNumber > annotation.pageNumber) break;
+      if (entry.level === 0) {
+        chapterTitle = entry.title; chapterKey = entry.id;
+        sectionTitle = "General notes"; sectionKey = `${entry.id}-general`;
+      } else {
+        sectionTitle = entry.title; sectionKey = entry.id;
+      }
+    }
+    let chapter = chapters.find((group) => group.key === chapterKey);
+    if (!chapter) { chapter = { key: chapterKey, title: chapterTitle, sections: [] }; chapters.push(chapter); }
+    let section = chapter.sections.find((group) => group.key === sectionKey);
+    if (!section) { section = { key: sectionKey, title: sectionTitle, annotations: [] }; chapter.sections.push(section); }
+    section.annotations.push(annotation);
+  }
+  return chapters;
 }
 
 export function DesktopApp() {
@@ -147,6 +177,9 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
     return clamp(desired, Math.min(320, maximum), maximum);
   });
   const [resizingSidebar, setResizingSidebar] = useState(false);
+  const [bookStructure, setBookStructure] = useState<BookStructureEntry[]>([]);
+  const [structureState, setStructureState] = useState<"idle" | "scanning" | "ready" | "empty" | "error">("idle");
+  const [structureProgress, setStructureProgress] = useState(0);
   const [draftArea, setDraftArea] = useState<NormalizedRect | null>(null);
   const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
   const [error, setError] = useState("");
@@ -164,7 +197,8 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
     Promise.all([getDocument(documentId), listAnnotations(documentId)]).then(async ([record, saved]) => {
       if (!record) throw new Error("This textbook was not found in the local library.");
       const opened = { ...record, lastOpenedAt: new Date().toISOString() }; await putDocument(opened);
-      setDocument(opened); setAnnotations(saved);
+      setDocument(opened); setAnnotations(saved); setBookStructure(opened.bookStructure ?? []);
+      if (opened.bookStructureScannedAt) setStructureState(opened.bookStructure?.length ? "ready" : "empty");
     }).catch((cause) => setError(message(cause, "This textbook could not be opened."))).finally(() => setLoading(false));
   }, [documentId]);
   useEffect(() => () => saveTimers.current.forEach(clearTimeout), []);
@@ -226,6 +260,18 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
     try { await putAnnotation(annotation); setSaveState("saved"); }
     catch (cause) { setSaveState("error"); setError(message(cause, "Your note could not be saved.")); }
   }, []);
+  async function readBookStructure(pdf: Parameters<typeof extractBookStructure>[0]) {
+    if (!document || document.bookStructureScannedAt || structureState === "scanning") return;
+    setStructureState("scanning"); setStructureProgress(0);
+    try {
+      const entries = await extractBookStructure(pdf, (page, count) => setStructureProgress(Math.round(page / count * 100)));
+      const updated = { ...document, bookStructure: entries, bookStructureScannedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      await putDocument(updated);
+      setDocument(updated); setBookStructure(entries); setStructureState(entries.length ? "ready" : "empty");
+    } catch {
+      setStructureState("error");
+    }
+  }
   function update(id: string, changes: Partial<AnnotationRecord>) {
     setAnnotations((current) => current.map((item) => {
       if (item.id !== id) return item;
@@ -329,6 +375,7 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
   const pageAnnotations = annotations.filter((item) => item.pageNumber === pageNumber);
   const latexError = selected ? mathError(selected.bodyMarkdown) : "";
   const renderedMarkdown = selected ? normalizeDisplayMath(selected.bodyMarkdown) : "";
+  const annotationGroups = useMemo(() => groupAnnotationsByStructure(annotations, bookStructure), [annotations, bookStructure]);
   const sidebarMaximum = Math.floor(viewportWidth / 2);
   const notesFontScale = clamp(1 + (sidebarWidth - 360) / 1800, 1, 1.2);
   const readerStyle = { "--notes-width": `${sidebarWidth}px`, "--notes-font-scale": notesFontScale } as CSSProperties;
@@ -339,11 +386,11 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
   return <main className={`reader-shell ${sidebarOpen ? "sidebar-is-open" : ""} ${resizingSidebar ? "is-resizing-sidebar" : ""}`} style={readerStyle}>
     <header className="reader-header desktop-drag-region"><button className="brand compact desktop-back-brand" onClick={onBack}><span className="brand-mark">M</span><span>MathMargin</span></button><div className="reader-title"><strong>{document.title}</strong><span>{document.pageCount} pages · stored locally</span></div><div className="save-indicator" data-state={saveState}><span />{saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved"}</div></header>
     <div className="reader-toolbar"><div className="tool-group"><button className={tool === "highlight" ? "active" : ""} onClick={() => { setTool("highlight"); setDraftArea(null); }}><span className="tool-icon">T</span> Highlight</button><button className={tool === "area" ? "active" : ""} onClick={() => setTool("area")}><span className="tool-icon rectangle-icon" /> Area</button></div><div className="page-controls"><button onClick={() => setPageNumber((page) => Math.max(1, page - 1))} disabled={pageNumber === 1}>←</button><input value={pageNumber} onChange={(event) => setPageNumber(clamp(Number(event.target.value) || 1, 1, document.pageCount))} /><span>of {document.pageCount}</span><button onClick={() => setPageNumber((page) => Math.min(document.pageCount, page + 1))} disabled={pageNumber === document.pageCount}>→</button></div><div className="zoom-controls" title="Pinch on a touchpad or hold Ctrl while using the mouse wheel"><button onClick={() => setZoom((value) => Math.max(.5, value - .1))}>−</button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom((value) => Math.min(3, value + .1))}>+</button></div><button className="notes-toggle" onClick={() => setSidebarOpen((value) => !value)}><span>✦</span> Notes <b>{annotations.length}</b></button></div>
-    <div className="reader-body" style={readerBodyStyle}><section className="pdf-stage" ref={pdfStageRef}><div className="tool-tip">{tool === "highlight" ? "Select text to add a note" : "Drag over a formula, figure, or passage"} · Pinch or Ctrl+wheel to zoom</div><Document file={pdfUrl} loading={<div className="pdf-loading"><span className="spinner" /> Rendering page…</div>} onLoadError={(cause) => setError(message(cause, "The PDF could not be rendered."))}><div className="pdf-page-wrap" ref={pageRef} onMouseUp={selectText}><Page pageNumber={pageNumber} width={Math.round(760 * zoom)} renderAnnotationLayer={false} renderTextLayer />
+    <div className="reader-body" style={readerBodyStyle}><section className="pdf-stage" ref={pdfStageRef}><div className="tool-tip">{tool === "highlight" ? "Select text to add a note" : "Drag over a formula, figure, or passage"} · Pinch or Ctrl+wheel to zoom</div><Document file={pdfUrl} loading={<div className="pdf-loading"><span className="spinner" /> Rendering page…</div>} onLoadSuccess={(pdf) => readBookStructure(pdf as unknown as Parameters<typeof extractBookStructure>[0])} onLoadError={(cause) => setError(message(cause, "The PDF could not be rendered."))}><div className="pdf-page-wrap" ref={pageRef} onMouseUp={selectText}><Page pageNumber={pageNumber} width={Math.round(760 * zoom)} renderAnnotationLayer={false} renderTextLayer />
       <div className="annotation-layer">{pageAnnotations.flatMap((annotation) => (isTextGeometry(annotation.geometry) ? annotation.geometry.rects : [annotation.geometry]).map((rect, index) => <button key={`${annotation.id}-${index}`} type="button" aria-label={`Open ${annotation.type === "area" ? "area" : "highlight"} annotation on page ${annotation.pageNumber}`} title="Open annotation" className={`annotation-mark ${annotation.type} color-${annotation.color} ${selectedId === annotation.id ? "selected" : ""}`} style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }} onClick={(event) => { event.stopPropagation(); setSelectedId(annotation.id); setSidebarOpen(true); }} />))}</div>
       {tool === "area" && <div className="area-interaction" onPointerDown={beginArea} onPointerMove={moveArea} onPointerUp={endArea}>{draftArea && <div className="draft-area" style={{ left: `${draftArea.x * 100}%`, top: `${draftArea.y * 100}%`, width: `${draftArea.width * 100}%`, height: `${draftArea.height * 100}%` }}>{draftArea.width >= .015 && draftArea.height >= .015 && <div className="draft-actions"><button onClick={() => { create("area", draftArea); setDraftArea(null); }}>Annotate area</button><button onClick={() => setDraftArea(null)}>Cancel</button></div>}</div>}</div>}
     </div></Document>{error && <div className="reader-toast"><span>!</span>{error}<button onClick={() => setError("")}>×</button></div>}</section>
-      <aside className="notes-panel">{sidebarOpen && <div className="notes-resizer" role="separator" aria-label="Resize annotation panel" aria-orientation="vertical" aria-valuemin={Math.min(320, sidebarMaximum)} aria-valuemax={sidebarMaximum} aria-valuenow={Math.round(sidebarWidth)} tabIndex={0} title="Drag to resize annotations" onPointerDown={beginSidebarResize} onPointerMove={moveSidebarResize} onPointerUp={endSidebarResize} onPointerCancel={endSidebarResize} onKeyDown={resizeSidebarWithKeyboard} />}<div className="notes-header"><div><p className="eyebrow">Local notebook</p><h2>Annotations</h2></div><button onClick={() => setSidebarOpen(false)}>×</button></div>{selected ? <div className="note-editor"><button className="back-to-notes" onClick={() => setSelectedId("")}>← All annotations</button><div className="note-meta"><span>{selected.type === "text" ? "Highlighted text" : "Selected area"}</span><button onClick={() => setPageNumber(selected.pageNumber)}>Page {selected.pageNumber}</button></div>{selected.selectedText && <blockquote>“{selected.selectedText}”</blockquote>}<div className="color-row"><span>Marker</span>{ANNOTATION_COLORS.map((color) => <button key={color} className={`color-dot ${color} ${selected.color === color ? "active" : ""}`} onClick={() => update(selected.id, { color: color as AnnotationColor })} />)}</div><label className="editor-label">Your note <span>Markdown + LaTeX</span></label><div className="latex-suite-status" title="Your active Obsidian LaTeX Suite snippet set is enabled. Automatic snippets expand as you type; press Tab for manual snippets and placeholder navigation."><span>⌨</span> LaTeX Suite · {LATEX_SUITE_SHORTCUT_COUNT} shortcuts · Tab to expand</div><textarea ref={editorRef} value={selected.bodyMarkdown} onChange={(event) => editNote(event.target.value)} onKeyDown={useLatexShortcut} placeholder={"Write your reasoning…\n\nType mk for inline math or dm for display math.\nInside math, try @a, RR, //, pmat, or iden3."} />{latexError && <div className="latex-error"><strong>LaTeX needs attention</strong>{latexError}</div>}<div className="preview-label">Rendered preview</div><div className={`note-preview ${!selected.bodyMarkdown ? "empty" : ""}`}>{selected.bodyMarkdown ? <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeKatex, { macros: KATEX_MACROS }]]}>{renderedMarkdown}</ReactMarkdown> : <span>Your formatted note will appear here.</span>}</div><div className="editor-footer"><span>{selected.bodyMarkdown.length.toLocaleString()} characters</span><button className="delete-note" onClick={() => discard(selected.id)}>Delete annotation</button></div></div> : <div className="notes-list">{annotations.length ? annotations.map((annotation) => <button className="note-card" key={annotation.id} onClick={() => { setSelectedId(annotation.id); setPageNumber(annotation.pageNumber); }}><span className={`note-stripe ${annotation.color}`} /><span className="note-card-copy"><span className="note-card-meta">Page {annotation.pageNumber} · {annotation.type}</span><strong>{annotation.bodyMarkdown || annotation.selectedText || "Untitled annotation"}</strong></span><span>→</span></button>) : <div className="notes-empty"><div>∴</div><h3>No annotations yet</h3><p>Select text or draw an area on the page. Your note will open here.</p></div>}</div>}</aside>
+      <aside className="notes-panel">{sidebarOpen && <div className="notes-resizer" role="separator" aria-label="Resize annotation panel" aria-orientation="vertical" aria-valuemin={Math.min(320, sidebarMaximum)} aria-valuemax={sidebarMaximum} aria-valuenow={Math.round(sidebarWidth)} tabIndex={0} title="Drag to resize annotations" onPointerDown={beginSidebarResize} onPointerMove={moveSidebarResize} onPointerUp={endSidebarResize} onPointerCancel={endSidebarResize} onKeyDown={resizeSidebarWithKeyboard} />}<div className="notes-header"><div><p className="eyebrow">Local notebook</p><h2>Annotations</h2></div><button onClick={() => setSidebarOpen(false)}>×</button></div>{selected ? <div className="note-editor"><button className="back-to-notes" onClick={() => setSelectedId("")}>← All annotations</button><div className="note-meta"><span>{selected.type === "text" ? "Highlighted text" : "Selected area"}</span><button onClick={() => setPageNumber(selected.pageNumber)}>Page {selected.pageNumber}</button></div>{selected.selectedText && <blockquote>“{selected.selectedText}”</blockquote>}<div className="color-row"><span>Marker</span>{ANNOTATION_COLORS.map((color) => <button key={color} className={`color-dot ${color} ${selected.color === color ? "active" : ""}`} onClick={() => update(selected.id, { color: color as AnnotationColor })} />)}</div><label className="editor-label">Your note <span>Markdown + LaTeX</span></label><div className="latex-suite-status" title="Your active Obsidian LaTeX Suite snippet set is enabled. Automatic snippets expand as you type; press Tab for manual snippets and placeholder navigation."><span>⌨</span> LaTeX Suite · {LATEX_SUITE_SHORTCUT_COUNT} shortcuts · Tab to expand</div><textarea ref={editorRef} value={selected.bodyMarkdown} onChange={(event) => editNote(event.target.value)} onKeyDown={useLatexShortcut} placeholder={"Write your reasoning…\n\nType mk for inline math or dm for display math.\nInside math, try @a, RR, //, pmat, or iden3."} />{latexError && <div className="latex-error"><strong>LaTeX needs attention</strong>{latexError}</div>}<div className="preview-label">Rendered preview</div><div className={`note-preview ${!selected.bodyMarkdown ? "empty" : ""}`}>{selected.bodyMarkdown ? <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeKatex, { macros: KATEX_MACROS }]]}>{renderedMarkdown}</ReactMarkdown> : <span>Your formatted note will appear here.</span>}</div><div className="editor-footer"><span>{selected.bodyMarkdown.length.toLocaleString()} characters</span><button className="delete-note" onClick={() => discard(selected.id)}>Delete annotation</button></div></div> : <div className="notes-list">{structureState === "scanning" && <div className="structure-status"><span className="spinner" /> Reading chapters and sections{structureProgress ? ` · ${structureProgress}%` : "…"}</div>}{structureState === "error" && <div className="structure-status warning">Chapter detection could not finish. Notes are still grouped by page.</div>}{structureState === "empty" && <div className="structure-status">No chapter headings were found in this PDF.</div>}{annotations.length ? annotationGroups.map((chapter) => <section className="annotation-chapter" key={chapter.key}><div className="annotation-chapter-heading"><strong>{chapter.title}</strong><span>{chapter.sections.reduce((total, section) => total + section.annotations.length, 0)}</span></div>{chapter.sections.map((section) => <div className="annotation-section" key={section.key}><div className="annotation-section-heading"><span>{section.title}</span><small>{section.annotations.length} {section.annotations.length === 1 ? "note" : "notes"}</small></div>{section.annotations.map((annotation) => <button className="note-card" key={annotation.id} onClick={() => { setSelectedId(annotation.id); setPageNumber(annotation.pageNumber); }}><span className={`note-stripe ${annotation.color}`} /><span className="note-card-copy"><span className="note-card-meta">Page {annotation.pageNumber} · {annotation.type}</span><strong>{annotation.bodyMarkdown || annotation.selectedText || "Untitled annotation"}</strong></span><span>→</span></button>)}</div>)}</section>) : <div className="notes-empty"><div>∴</div><h3>No annotations yet</h3><p>Select text or draw an area on the page. Your note will open here.</p></div>}</div>}</aside>
     </div>
   </main>;
 }

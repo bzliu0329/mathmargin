@@ -37,3 +37,7 @@ button, a, input, textarea, label { -webkit-app-region: no-drag; }
 .notes-panel .note-card-copy strong { font-size: calc(.72rem * var(--notes-font-scale, 1)); }
 .notes-panel .notes-empty h3 { font-size: calc(1.1rem * var(--notes-font-scale, 1)); }
 .notes-panel .notes-empty p { font-size: calc(.76rem * var(--notes-font-scale, 1)); }
+.notes-panel .structure-status { font-size: calc(.64rem * var(--notes-font-scale, 1)); }
+.notes-panel .annotation-chapter-heading strong { font-size: calc(.92rem * var(--notes-font-scale, 1)); }
+.notes-panel .annotation-section-heading > span { font-size: calc(.76rem * var(--notes-font-scale, 1)); }
+.notes-panel .annotation-section-heading small { font-size: calc(.55rem * var(--notes-font-scale, 1)); }

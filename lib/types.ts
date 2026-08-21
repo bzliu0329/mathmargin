@@ -7,6 +7,16 @@ export type DocumentRecord = {
   createdAt: string;
   updatedAt: string;
   lastOpenedAt: string;
+  bookStructure?: BookStructureEntry[];
+  bookStructureScannedAt?: string;
+};
+
+export type BookStructureEntry = {
+  id: string;
+  title: string;
+  pageNumber: number;
+  level: 0 | 1;
+  source: "outline" | "text";
 };
 
 export type NormalizedRect = { x: number; y: number; width: number; height: number };
