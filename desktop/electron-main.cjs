@@ -109,6 +109,25 @@ async function runUploadSmokeTest(window) {
         if (!document.querySelector(".note-preview .katex-display") || !previewText.includes("Before") || !previewText.includes("after")) {
           return { ok: false, uploaded: true, rendered: true, shortcuts: true, error: "Double-dollar math did not render as a standalone block between Markdown text." };
         }
+        const resizer = document.querySelector(".notes-resizer");
+        const panel = document.querySelector(".notes-panel");
+        const readerBody = document.querySelector(".reader-body");
+        const storedNotesWidth = localStorage.getItem("mathmargin:notes-width");
+        if (!resizer || !panel || !readerBody) return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, error: "The annotation panel resize handle was not rendered." };
+        readerBody.style.transition = "none";
+        resizer.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
+        await new Promise(resolve => setTimeout(resolve, 350));
+        const panelWidthBefore = panel.getBoundingClientRect().width;
+        const fontSizeBefore = parseFloat(getComputedStyle(editor).fontSize);
+        resizer.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", shiftKey: true, bubbles: true, cancelable: true }));
+        await new Promise(resolve => setTimeout(resolve, 350));
+        const panelWidthAfter = panel.getBoundingClientRect().width;
+        const fontSizeAfter = parseFloat(getComputedStyle(editor).fontSize);
+        readerBody.style.removeProperty("transition");
+        if (storedNotesWidth === null) localStorage.removeItem("mathmargin:notes-width"); else localStorage.setItem("mathmargin:notes-width", storedNotesWidth);
+        if (panelWidthAfter <= panelWidthBefore || panelWidthAfter > innerWidth / 2 + 1 || fontSizeAfter <= fontSizeBefore) {
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, error: "The annotation panel resize check failed (" + panelWidthBefore + "px to " + panelWidthAfter + "px; " + fontSizeBefore + "px to " + fontSizeAfter + "px; limit " + innerWidth / 2 + "px; inline " + readerBody?.style.gridTemplateColumns + "; computed " + (readerBody ? getComputedStyle(readerBody).gridTemplateColumns : "missing") + ")." };
+        }
         [...document.querySelectorAll(".tool-group button")].find(button => button.textContent?.includes("Area"))?.click();
         document.querySelector(".notes-header > button")?.click();
         await new Promise(resolve => setTimeout(resolve, 400));
@@ -134,7 +153,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, resizablePanel: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }

@@ -16,18 +16,24 @@ button, a, input, textarea, label { -webkit-app-region: no-drag; }
 .pdf-stage { overscroll-behavior: contain; }
 
 /* The notebook is a reading and writing surface, so keep its type comfortably legible. */
-.notes-panel .notes-header .eyebrow { font-size: .66rem; }
-.notes-panel .notes-header h2 { font-size: 1.45rem; }
-.notes-panel .back-to-notes { font-size: .82rem; }
-.notes-panel .note-meta { font-size: .7rem; }
-.notes-panel .color-row > span { font-size: .76rem; }
-.notes-panel .editor-label { font-size: .8rem; }
-.notes-panel .editor-label span { font-size: .7rem; }
-.notes-panel .latex-suite-status { font-size: .69rem; }
-.notes-panel .latex-suite-status > span { font-size: .82rem; }
-.notes-panel .note-editor textarea { font-size: .86rem; line-height: 1.65; }
-.notes-panel .latex-error { font-size: .72rem; }
-.notes-panel .preview-label { font-size: .7rem; }
-.notes-panel .note-preview { font-size: .92rem; }
-.notes-panel .note-preview.empty { font-size: .78rem; }
-.notes-panel .editor-footer { font-size: .7rem; }
+.notes-panel .notes-header .eyebrow { font-size: calc(.66rem * var(--notes-font-scale, 1)); }
+.notes-panel .notes-header h2 { font-size: calc(1.45rem * var(--notes-font-scale, 1)); }
+.notes-panel .notes-header > button { font-size: calc(1rem * var(--notes-font-scale, 1)); }
+.notes-panel .back-to-notes { font-size: calc(.82rem * var(--notes-font-scale, 1)); }
+.notes-panel .note-meta { font-size: calc(.7rem * var(--notes-font-scale, 1)); }
+.notes-panel .note-editor blockquote { font-size: calc(.78rem * var(--notes-font-scale, 1)); }
+.notes-panel .color-row > span { font-size: calc(.76rem * var(--notes-font-scale, 1)); }
+.notes-panel .editor-label { font-size: calc(.8rem * var(--notes-font-scale, 1)); }
+.notes-panel .editor-label span { font-size: calc(.7rem * var(--notes-font-scale, 1)); }
+.notes-panel .latex-suite-status { font-size: calc(.69rem * var(--notes-font-scale, 1)); }
+.notes-panel .latex-suite-status > span { font-size: calc(.82rem * var(--notes-font-scale, 1)); }
+.notes-panel .note-editor textarea { font-size: calc(.86rem * var(--notes-font-scale, 1)); line-height: 1.65; }
+.notes-panel .latex-error { font-size: calc(.72rem * var(--notes-font-scale, 1)); }
+.notes-panel .preview-label { font-size: calc(.7rem * var(--notes-font-scale, 1)); }
+.notes-panel .note-preview { font-size: calc(.92rem * var(--notes-font-scale, 1)); }
+.notes-panel .note-preview.empty { font-size: calc(.78rem * var(--notes-font-scale, 1)); }
+.notes-panel .editor-footer { font-size: calc(.7rem * var(--notes-font-scale, 1)); }
+.notes-panel .note-card-meta { font-size: calc(.58rem * var(--notes-font-scale, 1)); }
+.notes-panel .note-card-copy strong { font-size: calc(.72rem * var(--notes-font-scale, 1)); }
+.notes-panel .notes-empty h3 { font-size: calc(1.1rem * var(--notes-font-scale, 1)); }
+.notes-panel .notes-empty p { font-size: calc(.76rem * var(--notes-font-scale, 1)); }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
@@ -18,6 +18,8 @@ const KATEX_MACROS = {
   "\\braket": "\\left\\langle #1 \\right\\rangle",
   "\\hom": "\\operatorname{hom}",
 };
+
+const NOTES_WIDTH_KEY = "mathmargin:notes-width";
 
 function clamp(value: number, min = 0, max = 1) { return Math.min(max, Math.max(min, value)); }
 function isTextGeometry(value: AnnotationGeometry): value is { rects: NormalizedRect[] } { return "rects" in value; }
@@ -137,6 +139,14 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
   const [tool, setTool] = useState<"highlight" | "area">("highlight");
   const [selectedId, setSelectedId] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const stored = Number(localStorage.getItem(NOTES_WIDTH_KEY));
+    const desired = Number.isFinite(stored) && stored > 0 ? stored : 400;
+    const maximum = Math.floor(window.innerWidth / 2);
+    return clamp(desired, Math.min(320, maximum), maximum);
+  });
+  const [resizingSidebar, setResizingSidebar] = useState(false);
   const [draftArea, setDraftArea] = useState<NormalizedRect | null>(null);
   const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
   const [error, setError] = useState("");
@@ -147,6 +157,8 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
   const drawStart = useRef<{ x: number; y: number } | null>(null);
   const saveTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const latexTabState = useRef<LatexTabState>(null);
+  const sidebarWidthRef = useRef(sidebarWidth);
+  const sidebarResizeStart = useRef<{ pointerId: number; clientX: number; width: number } | null>(null);
 
   useEffect(() => {
     Promise.all([getDocument(documentId), listAnnotations(documentId)]).then(async ([record, saved]) => {
@@ -157,6 +169,20 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
   }, [documentId]);
   useEffect(() => () => saveTimers.current.forEach(clearTimeout), []);
   useEffect(() => { latexTabState.current = null; }, [selectedId]);
+  useEffect(() => {
+    const fitSidebar = () => {
+      const width = window.innerWidth;
+      const maximum = Math.floor(width / 2);
+      setViewportWidth(width);
+      setSidebarWidth((current) => {
+        const next = clamp(current, Math.min(320, maximum), maximum);
+        sidebarWidthRef.current = next;
+        return next;
+      });
+    };
+    addEventListener("resize", fitSidebar);
+    return () => removeEventListener("resize", fitSidebar);
+  }, []);
   useEffect(() => {
     const stage = pdfStageRef.current;
     if (!stage || !document) return;
@@ -264,21 +290,60 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
   function moveArea(event: React.PointerEvent<HTMLDivElement>) { if (!drawStart.current) return; const p = point(event); setDraftArea({ x: Math.min(drawStart.current.x, p.x), y: Math.min(drawStart.current.y, p.y), width: Math.abs(p.x - drawStart.current.x), height: Math.abs(p.y - drawStart.current.y) }); }
   function endArea(event: React.PointerEvent<HTMLDivElement>) { drawStart.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); setDraftArea((current) => current && current.width >= .015 && current.height >= .015 ? current : null); }
 
+  function setNotesWidth(value: number, persist = false) {
+    const maximum = Math.floor(window.innerWidth / 2);
+    const next = clamp(value, Math.min(320, maximum), maximum);
+    sidebarWidthRef.current = next;
+    setSidebarWidth(next);
+    if (persist) localStorage.setItem(NOTES_WIDTH_KEY, String(Math.round(next)));
+  }
+  function beginSidebarResize(event: React.PointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    sidebarResizeStart.current = { pointerId: event.pointerId, clientX: event.clientX, width: sidebarWidthRef.current };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setResizingSidebar(true);
+  }
+  function moveSidebarResize(event: React.PointerEvent<HTMLDivElement>) {
+    const start = sidebarResizeStart.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    setNotesWidth(start.width + start.clientX - event.clientX);
+  }
+  function endSidebarResize(event: React.PointerEvent<HTMLDivElement>) {
+    if (sidebarResizeStart.current?.pointerId !== event.pointerId) return;
+    sidebarResizeStart.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    setResizingSidebar(false);
+    localStorage.setItem(NOTES_WIDTH_KEY, String(Math.round(sidebarWidthRef.current)));
+  }
+  function resizeSidebarWithKeyboard(event: React.KeyboardEvent<HTMLDivElement>) {
+    const step = event.shiftKey ? 48 : 20;
+    if (event.key === "ArrowLeft") setNotesWidth(sidebarWidthRef.current + step, true);
+    else if (event.key === "ArrowRight") setNotesWidth(sidebarWidthRef.current - step, true);
+    else if (event.key === "Home") setNotesWidth(320, true);
+    else if (event.key === "End") setNotesWidth(window.innerWidth / 2, true);
+    else return;
+    event.preventDefault();
+  }
+
   const selected = annotations.find((item) => item.id === selectedId) ?? null;
   const pageAnnotations = annotations.filter((item) => item.pageNumber === pageNumber);
   const latexError = selected ? mathError(selected.bodyMarkdown) : "";
   const renderedMarkdown = selected ? normalizeDisplayMath(selected.bodyMarkdown) : "";
+  const sidebarMaximum = Math.floor(viewportWidth / 2);
+  const notesFontScale = clamp(1 + (sidebarWidth - 360) / 1800, 1, 1.2);
+  const readerStyle = { "--notes-width": `${sidebarWidth}px`, "--notes-font-scale": notesFontScale } as CSSProperties;
+  const readerBodyStyle = sidebarOpen ? { gridTemplateColumns: `minmax(0, 1fr) ${Math.min(sidebarWidth, sidebarMaximum)}px` } : undefined;
   if (loading) return <main className="reader-status"><span className="spinner" /><h1>Opening your textbook…</h1></main>;
   if (!document) return <main className="reader-status"><div className="error-orbit">!</div><h1>We couldn’t open this textbook</h1><p>{error}</p><button className="primary-button" onClick={onBack}>Return to library</button></main>;
 
-  return <main className={`reader-shell ${sidebarOpen ? "sidebar-is-open" : ""}`}>
+  return <main className={`reader-shell ${sidebarOpen ? "sidebar-is-open" : ""} ${resizingSidebar ? "is-resizing-sidebar" : ""}`} style={readerStyle}>
     <header className="reader-header desktop-drag-region"><button className="brand compact desktop-back-brand" onClick={onBack}><span className="brand-mark">M</span><span>MathMargin</span></button><div className="reader-title"><strong>{document.title}</strong><span>{document.pageCount} pages · stored locally</span></div><div className="save-indicator" data-state={saveState}><span />{saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved"}</div></header>
     <div className="reader-toolbar"><div className="tool-group"><button className={tool === "highlight" ? "active" : ""} onClick={() => { setTool("highlight"); setDraftArea(null); }}><span className="tool-icon">T</span> Highlight</button><button className={tool === "area" ? "active" : ""} onClick={() => setTool("area")}><span className="tool-icon rectangle-icon" /> Area</button></div><div className="page-controls"><button onClick={() => setPageNumber((page) => Math.max(1, page - 1))} disabled={pageNumber === 1}>←</button><input value={pageNumber} onChange={(event) => setPageNumber(clamp(Number(event.target.value) || 1, 1, document.pageCount))} /><span>of {document.pageCount}</span><button onClick={() => setPageNumber((page) => Math.min(document.pageCount, page + 1))} disabled={pageNumber === document.pageCount}>→</button></div><div className="zoom-controls" title="Pinch on a touchpad or hold Ctrl while using the mouse wheel"><button onClick={() => setZoom((value) => Math.max(.5, value - .1))}>−</button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom((value) => Math.min(3, value + .1))}>+</button></div><button className="notes-toggle" onClick={() => setSidebarOpen((value) => !value)}><span>✦</span> Notes <b>{annotations.length}</b></button></div>
-    <div className="reader-body"><section className="pdf-stage" ref={pdfStageRef}><div className="tool-tip">{tool === "highlight" ? "Select text to add a note" : "Drag over a formula, figure, or passage"} · Pinch or Ctrl+wheel to zoom</div><Document file={pdfUrl} loading={<div className="pdf-loading"><span className="spinner" /> Rendering page…</div>} onLoadError={(cause) => setError(message(cause, "The PDF could not be rendered."))}><div className="pdf-page-wrap" ref={pageRef} onMouseUp={selectText}><Page pageNumber={pageNumber} width={Math.round(760 * zoom)} renderAnnotationLayer={false} renderTextLayer />
+    <div className="reader-body" style={readerBodyStyle}><section className="pdf-stage" ref={pdfStageRef}><div className="tool-tip">{tool === "highlight" ? "Select text to add a note" : "Drag over a formula, figure, or passage"} · Pinch or Ctrl+wheel to zoom</div><Document file={pdfUrl} loading={<div className="pdf-loading"><span className="spinner" /> Rendering page…</div>} onLoadError={(cause) => setError(message(cause, "The PDF could not be rendered."))}><div className="pdf-page-wrap" ref={pageRef} onMouseUp={selectText}><Page pageNumber={pageNumber} width={Math.round(760 * zoom)} renderAnnotationLayer={false} renderTextLayer />
       <div className="annotation-layer">{pageAnnotations.flatMap((annotation) => (isTextGeometry(annotation.geometry) ? annotation.geometry.rects : [annotation.geometry]).map((rect, index) => <button key={`${annotation.id}-${index}`} type="button" aria-label={`Open ${annotation.type === "area" ? "area" : "highlight"} annotation on page ${annotation.pageNumber}`} title="Open annotation" className={`annotation-mark ${annotation.type} color-${annotation.color} ${selectedId === annotation.id ? "selected" : ""}`} style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }} onClick={(event) => { event.stopPropagation(); setSelectedId(annotation.id); setSidebarOpen(true); }} />))}</div>
       {tool === "area" && <div className="area-interaction" onPointerDown={beginArea} onPointerMove={moveArea} onPointerUp={endArea}>{draftArea && <div className="draft-area" style={{ left: `${draftArea.x * 100}%`, top: `${draftArea.y * 100}%`, width: `${draftArea.width * 100}%`, height: `${draftArea.height * 100}%` }}>{draftArea.width >= .015 && draftArea.height >= .015 && <div className="draft-actions"><button onClick={() => { create("area", draftArea); setDraftArea(null); }}>Annotate area</button><button onClick={() => setDraftArea(null)}>Cancel</button></div>}</div>}</div>}
     </div></Document>{error && <div className="reader-toast"><span>!</span>{error}<button onClick={() => setError("")}>×</button></div>}</section>
-      <aside className="notes-panel"><div className="notes-header"><div><p className="eyebrow">Local notebook</p><h2>Annotations</h2></div><button onClick={() => setSidebarOpen(false)}>×</button></div>{selected ? <div className="note-editor"><button className="back-to-notes" onClick={() => setSelectedId("")}>← All annotations</button><div className="note-meta"><span>{selected.type === "text" ? "Highlighted text" : "Selected area"}</span><button onClick={() => setPageNumber(selected.pageNumber)}>Page {selected.pageNumber}</button></div>{selected.selectedText && <blockquote>“{selected.selectedText}”</blockquote>}<div className="color-row"><span>Marker</span>{ANNOTATION_COLORS.map((color) => <button key={color} className={`color-dot ${color} ${selected.color === color ? "active" : ""}`} onClick={() => update(selected.id, { color: color as AnnotationColor })} />)}</div><label className="editor-label">Your note <span>Markdown + LaTeX</span></label><div className="latex-suite-status" title="Your active Obsidian LaTeX Suite snippet set is enabled. Automatic snippets expand as you type; press Tab for manual snippets and placeholder navigation."><span>⌨</span> LaTeX Suite · {LATEX_SUITE_SHORTCUT_COUNT} shortcuts · Tab to expand</div><textarea ref={editorRef} value={selected.bodyMarkdown} onChange={(event) => editNote(event.target.value)} onKeyDown={useLatexShortcut} placeholder={"Write your reasoning…\n\nType mk for inline math or dm for display math.\nInside math, try @a, RR, //, pmat, or iden3."} />{latexError && <div className="latex-error"><strong>LaTeX needs attention</strong>{latexError}</div>}<div className="preview-label">Rendered preview</div><div className={`note-preview ${!selected.bodyMarkdown ? "empty" : ""}`}>{selected.bodyMarkdown ? <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeKatex, { macros: KATEX_MACROS }]]}>{renderedMarkdown}</ReactMarkdown> : <span>Your formatted note will appear here.</span>}</div><div className="editor-footer"><span>{selected.bodyMarkdown.length.toLocaleString()} characters</span><button className="delete-note" onClick={() => discard(selected.id)}>Delete annotation</button></div></div> : <div className="notes-list">{annotations.length ? annotations.map((annotation) => <button className="note-card" key={annotation.id} onClick={() => { setSelectedId(annotation.id); setPageNumber(annotation.pageNumber); }}><span className={`note-stripe ${annotation.color}`} /><span className="note-card-copy"><span className="note-card-meta">Page {annotation.pageNumber} · {annotation.type}</span><strong>{annotation.bodyMarkdown || annotation.selectedText || "Untitled annotation"}</strong></span><span>→</span></button>) : <div className="notes-empty"><div>∴</div><h3>No annotations yet</h3><p>Select text or draw an area on the page. Your note will open here.</p></div>}</div>}</aside>
+      <aside className="notes-panel">{sidebarOpen && <div className="notes-resizer" role="separator" aria-label="Resize annotation panel" aria-orientation="vertical" aria-valuemin={Math.min(320, sidebarMaximum)} aria-valuemax={sidebarMaximum} aria-valuenow={Math.round(sidebarWidth)} tabIndex={0} title="Drag to resize annotations" onPointerDown={beginSidebarResize} onPointerMove={moveSidebarResize} onPointerUp={endSidebarResize} onPointerCancel={endSidebarResize} onKeyDown={resizeSidebarWithKeyboard} />}<div className="notes-header"><div><p className="eyebrow">Local notebook</p><h2>Annotations</h2></div><button onClick={() => setSidebarOpen(false)}>×</button></div>{selected ? <div className="note-editor"><button className="back-to-notes" onClick={() => setSelectedId("")}>← All annotations</button><div className="note-meta"><span>{selected.type === "text" ? "Highlighted text" : "Selected area"}</span><button onClick={() => setPageNumber(selected.pageNumber)}>Page {selected.pageNumber}</button></div>{selected.selectedText && <blockquote>“{selected.selectedText}”</blockquote>}<div className="color-row"><span>Marker</span>{ANNOTATION_COLORS.map((color) => <button key={color} className={`color-dot ${color} ${selected.color === color ? "active" : ""}`} onClick={() => update(selected.id, { color: color as AnnotationColor })} />)}</div><label className="editor-label">Your note <span>Markdown + LaTeX</span></label><div className="latex-suite-status" title="Your active Obsidian LaTeX Suite snippet set is enabled. Automatic snippets expand as you type; press Tab for manual snippets and placeholder navigation."><span>⌨</span> LaTeX Suite · {LATEX_SUITE_SHORTCUT_COUNT} shortcuts · Tab to expand</div><textarea ref={editorRef} value={selected.bodyMarkdown} onChange={(event) => editNote(event.target.value)} onKeyDown={useLatexShortcut} placeholder={"Write your reasoning…\n\nType mk for inline math or dm for display math.\nInside math, try @a, RR, //, pmat, or iden3."} />{latexError && <div className="latex-error"><strong>LaTeX needs attention</strong>{latexError}</div>}<div className="preview-label">Rendered preview</div><div className={`note-preview ${!selected.bodyMarkdown ? "empty" : ""}`}>{selected.bodyMarkdown ? <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeKatex, { macros: KATEX_MACROS }]]}>{renderedMarkdown}</ReactMarkdown> : <span>Your formatted note will appear here.</span>}</div><div className="editor-footer"><span>{selected.bodyMarkdown.length.toLocaleString()} characters</span><button className="delete-note" onClick={() => discard(selected.id)}>Delete annotation</button></div></div> : <div className="notes-list">{annotations.length ? annotations.map((annotation) => <button className="note-card" key={annotation.id} onClick={() => { setSelectedId(annotation.id); setPageNumber(annotation.pageNumber); }}><span className={`note-stripe ${annotation.color}`} /><span className="note-card-copy"><span className="note-card-meta">Page {annotation.pageNumber} · {annotation.type}</span><strong>{annotation.bodyMarkdown || annotation.selectedText || "Untitled annotation"}</strong></span><span>→</span></button>) : <div className="notes-empty"><div>∴</div><h3>No annotations yet</h3><p>Select text or draw an area on the page. Your note will open here.</p></div>}</div>}</aside>
     </div>
   </main>;
 }
