@@ -1,5 +1,7 @@
 import type { BookStructureEntry } from "../../lib/types";
 
+export const BOOK_STRUCTURE_VERSION = 2;
+
 type PdfOutlineItem = { title?: string; dest?: string | unknown[] | null; items?: PdfOutlineItem[] };
 type PdfTextItem = { str: string; transform: number[]; height?: number; fontName?: string };
 type StructurePdf = {
@@ -52,7 +54,7 @@ async function readOutline(pdf: StructurePdf) {
   return found
     .map((entry) => ({ ...entry, level: (entry.depth > baseDepth || /^\d+(?:\.\d+)+\b/.test(entry.title) ? 1 : 0) as 0 | 1 }))
     .map(({ depth: _depth, ...entry }) => ({ ...entry, id: entryId(entry.source, entry.pageNumber, entry.level, entry.title) }))
-    .sort((a, b) => a.pageNumber - b.pageNumber || a.level - b.level);
+    .sort((a, b) => a.pageNumber - b.pageNumber);
 }
 
 function median(values: number[]) {

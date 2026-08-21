@@ -9,6 +9,7 @@ export type DocumentRecord = {
   lastOpenedAt: string;
   bookStructure?: BookStructureEntry[];
   bookStructureScannedAt?: string;
+  bookStructureVersion?: number;
 };
 
 export type BookStructureEntry = {

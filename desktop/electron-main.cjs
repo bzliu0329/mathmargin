@@ -146,6 +146,10 @@ async function runUploadSmokeTest(window) {
         if (!document.querySelector(".annotation-chapter-heading") || !document.querySelector(".annotation-section-heading") || !document.querySelector(".notes-list .note-card")) {
           return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, error: "All annotations were not grouped into a chapter and section." };
         }
+        const emptySectionCounts = [...document.querySelectorAll(".annotation-section-heading small")].filter(element => element.textContent?.trim() === "0 notes");
+        if (!emptySectionCounts.length || !document.querySelector(".empty-section-notes")) {
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, chapterGrouping: true, error: "Detected sections without annotations were hidden from All annotations." };
+        }
         const detectedChapterTitle = document.querySelector(".annotation-chapter-heading strong")?.textContent?.trim();
         const detectedSectionTitle = document.querySelector(".annotation-section-heading > span")?.textContent?.trim();
         [...document.querySelectorAll(".tool-group button")].find(button => button.textContent?.includes("Area"))?.click();
@@ -173,7 +177,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, chapterGrouping: true, detectedChapterTitle, detectedSectionTitle, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, chapterGrouping: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
