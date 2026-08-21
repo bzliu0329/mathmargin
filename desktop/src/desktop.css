@@ -14,3 +14,20 @@ button, a, input, textarea, label { -webkit-app-region: no-drag; }
 .latex-suite-status { display: flex; align-items: center; gap: .35rem; margin: 0 0 .45rem; padding: .4rem .55rem; border: 1px solid #d8e2dc; border-radius: .4rem; background: #f5faf7; color: #42695b; font-size: .58rem; line-height: 1.3; }
 .latex-suite-status > span { font-size: .72rem; }
 .pdf-stage { overscroll-behavior: contain; }
+
+/* The notebook is a reading and writing surface, so keep its type comfortably legible. */
+.notes-panel .notes-header .eyebrow { font-size: .66rem; }
+.notes-panel .notes-header h2 { font-size: 1.45rem; }
+.notes-panel .back-to-notes { font-size: .82rem; }
+.notes-panel .note-meta { font-size: .7rem; }
+.notes-panel .color-row > span { font-size: .76rem; }
+.notes-panel .editor-label { font-size: .8rem; }
+.notes-panel .editor-label span { font-size: .7rem; }
+.notes-panel .latex-suite-status { font-size: .69rem; }
+.notes-panel .latex-suite-status > span { font-size: .82rem; }
+.notes-panel .note-editor textarea { font-size: .86rem; line-height: 1.65; }
+.notes-panel .latex-error { font-size: .72rem; }
+.notes-panel .preview-label { font-size: .7rem; }
+.notes-panel .note-preview { font-size: .92rem; }
+.notes-panel .note-preview.empty { font-size: .78rem; }
+.notes-panel .editor-footer { font-size: .7rem; }
