@@ -1,0 +1,13 @@
+html, body, #root { width: 100%; min-width: 720px; height: 100%; min-height: 520px; overflow: hidden; }
+body { -webkit-font-smoothing: antialiased; }
+.desktop-library { height: 100%; overflow-y: auto; }
+.desktop-drag-region { -webkit-app-region: drag; }
+button, a, input, textarea, label { -webkit-app-region: no-drag; }
+.desktop-local-pill { display: inline-flex; align-items: center; gap: .45rem; color: var(--muted); font-size: .7rem; }
+.desktop-local-pill::before { content: ""; width: .45rem; height: .45rem; border-radius: 50%; background: #4c9a74; }
+.desktop-note-toolbar { display: flex; align-items: center; gap: .4rem; }
+.desktop-note-toolbar button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: .68rem; }
+.desktop-page-error { display: grid; place-items: center; min-height: 18rem; color: #8a4b43; font-size: .8rem; }
+.desktop-book-title, .desktop-back-brand { padding: 0; border: 0; background: none; cursor: pointer; text-align: left; }
+.desktop-book-title { width: 100%; }
+.book-cover { width: 100%; border: 0; cursor: pointer; }
