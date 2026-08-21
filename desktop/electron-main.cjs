@@ -60,6 +60,16 @@ async function runUploadSmokeTest(window) {
         if (!document.querySelector(".pdf-page-wrap canvas")) {
           return { ok: false, uploaded: true, error: "The saved PDF did not render within 10 seconds." };
         }
+        const pdfStage = document.querySelector(".pdf-stage");
+        const pageBounds = document.querySelector(".pdf-page-wrap")?.getBoundingClientRect();
+        const zoomBefore = document.querySelector(".zoom-controls span")?.textContent;
+        if (!pdfStage || !pageBounds || !zoomBefore) return { ok: false, uploaded: true, rendered: true, error: "The zoom controls were not rendered." };
+        pdfStage.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100, clientX: pageBounds.left + pageBounds.width / 2, clientY: pageBounds.top + pageBounds.height / 2 }));
+        const zoomStartedAt = Date.now();
+        while (document.querySelector(".zoom-controls span")?.textContent === zoomBefore && Date.now() - zoomStartedAt < 3000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        if (document.querySelector(".zoom-controls span")?.textContent === zoomBefore) return { ok: false, uploaded: true, rendered: true, error: "Ctrl+wheel did not change the PDF zoom." };
         const textSpan = document.querySelector(".react-pdf__Page__textContent span");
         if (!textSpan) return { ok: false, uploaded: true, rendered: true, error: "The PDF text layer was not rendered." };
         const range = document.createRange();
@@ -103,7 +113,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, shortcuts: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
