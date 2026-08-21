@@ -121,7 +121,7 @@ button { color: inherit; }
 .pdf-page-wrap canvas { display: block; }
 .pdf-loading { display: flex; align-items: center; gap: .6rem; padding: 4rem; color: var(--muted); font-size: .8rem; }
 .annotation-layer, .area-interaction { position: absolute; inset: 0; }
-.annotation-layer { z-index: 3; pointer-events: none; }
+.annotation-layer { z-index: 6; pointer-events: none; }
 .annotation-mark { position: absolute; display: block; margin: 0; padding: 0; border: 0; cursor: pointer; pointer-events: auto; transition: outline .15s, background .15s; }
 .annotation-mark.text { mix-blend-mode: multiply; border-radius: 2px; }
 .annotation-mark.area { border: 2px solid; background: transparent; box-shadow: inset 0 0 0 999px rgba(255,255,255,.01); }

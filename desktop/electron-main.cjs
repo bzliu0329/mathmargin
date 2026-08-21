@@ -99,6 +99,17 @@ async function runUploadSmokeTest(window) {
         editor.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
         await new Promise(resolve => setTimeout(resolve, 100));
         if (editor.value !== "$\\\\alpha$") return { ok: false, uploaded: true, rendered: true, error: "The @a shortcut produced " + JSON.stringify(editor.value) + "." };
+        [...document.querySelectorAll(".tool-group button")].find(button => button.textContent?.includes("Area"))?.click();
+        document.querySelector(".notes-header > button")?.click();
+        await new Promise(resolve => setTimeout(resolve, 400));
+        const mark = document.querySelector(".annotation-mark");
+        const markBounds = mark?.getBoundingClientRect();
+        if (!markBounds || !document.querySelector(".area-interaction")) return { ok: false, uploaded: true, rendered: true, error: "The annotation overlay click test could not start." };
+        const hitTarget = document.elementFromPoint(markBounds.left + markBounds.width / 2, markBounds.top + markBounds.height / 2);
+        if (!hitTarget?.closest(".annotation-mark")) return { ok: false, uploaded: true, rendered: true, error: "The Area drawing layer covered the saved annotation." };
+        hitTarget.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        await new Promise(resolve => setTimeout(resolve, 200));
+        if (!document.querySelector(".reader-shell")?.classList.contains("sidebar-is-open")) return { ok: false, uploaded: true, rendered: true, error: "Clicking the saved annotation did not open the sidebar." };
         location.hash = "";
         const libraryStartedAt = Date.now();
         while (!document.querySelector(".desktop-library") && Date.now() - libraryStartedAt < 5000) {
@@ -113,7 +124,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
