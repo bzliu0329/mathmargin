@@ -99,6 +99,16 @@ async function runUploadSmokeTest(window) {
         editor.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
         await new Promise(resolve => setTimeout(resolve, 100));
         if (editor.value !== "$\\\\alpha$") return { ok: false, uploaded: true, rendered: true, error: "The @a shortcut produced " + JSON.stringify(editor.value) + "." };
+        valueSetter?.call(editor, "Before $$x^2$$ after");
+        editor.dispatchEvent(new Event("input", { bubbles: true }));
+        const displayMathStartedAt = Date.now();
+        while (!document.querySelector(".note-preview .katex-display") && Date.now() - displayMathStartedAt < 3000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        const previewText = document.querySelector(".note-preview")?.textContent ?? "";
+        if (!document.querySelector(".note-preview .katex-display") || !previewText.includes("Before") || !previewText.includes("after")) {
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, error: "Double-dollar math did not render as a standalone block between Markdown text." };
+        }
         [...document.querySelectorAll(".tool-group button")].find(button => button.textContent?.includes("Area"))?.click();
         document.querySelector(".notes-header > button")?.click();
         await new Promise(resolve => setTimeout(resolve, 400));
@@ -124,7 +134,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
