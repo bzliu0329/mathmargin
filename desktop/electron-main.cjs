@@ -128,6 +128,16 @@ async function runUploadSmokeTest(window) {
         if (panelWidthAfter <= panelWidthBefore || panelWidthAfter > innerWidth / 2 + 1 || fontSizeAfter <= fontSizeBefore) {
           return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, error: "The annotation panel resize check failed (" + panelWidthBefore + "px to " + panelWidthAfter + "px; " + fontSizeBefore + "px to " + fontSizeAfter + "px; limit " + innerWidth / 2 + "px; inline " + readerBody?.style.gridTemplateColumns + "; computed " + (readerBody ? getComputedStyle(readerBody).gridTemplateColumns : "missing") + ")." };
         }
+        const longNote = Array.from({ length: 36 }, (_, index) => "Paragraph " + (index + 1) + ": $x_{" + (index + 1) + "}^2$").join("\\n\\n");
+        valueSetter?.call(editor, longNote);
+        editor.dispatchEvent(new Event("input", { bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 200));
+        const preview = document.querySelector(".note-preview");
+        if (!preview) return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, error: "The rendered preview was not available for its scroll test." };
+        preview.scrollTop = preview.scrollHeight;
+        if (preview.scrollHeight <= preview.clientHeight || preview.scrollTop <= 0 || getComputedStyle(preview).overflowY !== "auto" || getComputedStyle(preview).resize !== "vertical") {
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, error: "A long rendered preview was not independently scrollable and vertically resizable." };
+        }
         [...document.querySelectorAll(".tool-group button")].find(button => button.textContent?.includes("Area"))?.click();
         document.querySelector(".notes-header > button")?.click();
         await new Promise(resolve => setTimeout(resolve, 400));
@@ -153,7 +163,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, resizablePanel: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
