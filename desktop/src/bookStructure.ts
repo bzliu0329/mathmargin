@@ -1,6 +1,6 @@
 import type { BookStructureEntry } from "../../lib/types";
 
-export const BOOK_STRUCTURE_VERSION = 2;
+export const BOOK_STRUCTURE_VERSION = 3;
 
 type PdfOutlineItem = { title?: string; dest?: string | unknown[] | null; items?: PdfOutlineItem[] };
 type PdfTextItem = { str: string; transform: number[]; height?: number; fontName?: string };
@@ -22,6 +22,27 @@ function cleanTitle(value?: string) {
 
 function entryId(source: BookStructureEntry["source"], pageNumber: number, level: number, title: string) {
   return `${source}-${pageNumber}-${level}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60)}`;
+}
+
+function explicitNumber(entry: BookStructureEntry) {
+  if (entry.level === 1) return entry.title.match(/^(\d+(?:\.\d+)+)\b/)?.[1];
+  return entry.title.match(/^(?:chapter|part|appendix)\s+([A-Z0-9IVXLC]+)\b/i)?.[1]
+    ?? entry.title.match(/^(\d+|[IVXLC]+)\b/)?.[1];
+}
+
+function numberStructure(entries: BookStructureEntry[]) {
+  let chapterIndex = 0;
+  let sectionIndex = 0;
+  let chapterNumber = "";
+  return entries.map((entry) => {
+    if (entry.level === 0) {
+      chapterIndex += 1; sectionIndex = 0;
+      chapterNumber = explicitNumber(entry) ?? String(chapterIndex);
+      return { ...entry, number: chapterNumber };
+    }
+    sectionIndex += 1;
+    return { ...entry, number: explicitNumber(entry) ?? `${chapterNumber || chapterIndex || 1}.${sectionIndex}` };
+  });
 }
 
 async function destinationPage(pdf: StructurePdf, destination: PdfOutlineItem["dest"]) {
@@ -122,5 +143,5 @@ async function inferFromText(pdf: StructurePdf, onProgress?: (pageNumber: number
 
 export async function extractBookStructure(pdf: StructurePdf, onProgress?: (pageNumber: number, pageCount: number) => void) {
   const outline = await readOutline(pdf);
-  return outline.length ? outline : inferFromText(pdf, onProgress);
+  return numberStructure(outline.length ? outline : await inferFromText(pdf, onProgress));
 }

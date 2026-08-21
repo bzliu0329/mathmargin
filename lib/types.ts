@@ -15,6 +15,7 @@ export type DocumentRecord = {
 export type BookStructureEntry = {
   id: string;
   title: string;
+  number?: string;
   pageNumber: number;
   level: 0 | 1;
   source: "outline" | "text";

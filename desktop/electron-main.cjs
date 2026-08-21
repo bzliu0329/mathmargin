@@ -70,7 +70,12 @@ async function runUploadSmokeTest(window) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
         if (document.querySelector(".zoom-controls span")?.textContent === zoomBefore) return { ok: false, uploaded: true, rendered: true, error: "Ctrl+wheel did not change the PDF zoom." };
-        const textSpan = document.querySelector(".react-pdf__Page__textContent span");
+        let textSpan = document.querySelector(".react-pdf__Page__textContent span");
+        const textLayerStartedAt = Date.now();
+        while (!textSpan && Date.now() - textLayerStartedAt < 5000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          textSpan = document.querySelector(".react-pdf__Page__textContent span");
+        }
         if (!textSpan) return { ok: false, uploaded: true, rendered: true, error: "The PDF text layer was not rendered." };
         const range = document.createRange();
         range.selectNodeContents(textSpan);
@@ -152,6 +157,9 @@ async function runUploadSmokeTest(window) {
         }
         const detectedChapterTitle = document.querySelector(".annotation-chapter-heading strong")?.textContent?.trim();
         const detectedSectionTitle = document.querySelector(".annotation-section-heading > span")?.textContent?.trim();
+        if (!detectedChapterTitle?.startsWith("Chapter 1 ·") || !detectedSectionTitle?.startsWith("Section 1.1 ·")) {
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, chapterGrouping: true, emptySectionsVisible: true, error: "Chapter and section numbers were not shown explicitly." };
+        }
         [...document.querySelectorAll(".tool-group button")].find(button => button.textContent?.includes("Area"))?.click();
         document.querySelector(".notes-header > button")?.click();
         await new Promise(resolve => setTimeout(resolve, 400));
