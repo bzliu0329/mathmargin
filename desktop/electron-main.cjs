@@ -139,9 +139,22 @@ async function runUploadSmokeTest(window) {
         await new Promise(resolve => setTimeout(resolve, 200));
         const preview = document.querySelector(".note-preview");
         if (!preview) return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, error: "The rendered preview was not available for its scroll test." };
-        preview.scrollTop = preview.scrollHeight;
-        if (preview.scrollHeight <= preview.clientHeight || preview.scrollTop <= 0 || getComputedStyle(preview).overflowY !== "auto" || getComputedStyle(preview).resize !== "vertical") {
-          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, error: "A long rendered preview was not independently scrollable and vertically resizable." };
+        const previewBottomGap = preview.scrollHeight - preview.clientHeight - preview.scrollTop;
+        if (preview.scrollHeight <= preview.clientHeight || preview.scrollTop <= 0 || previewBottomGap > 2 || getComputedStyle(preview).overflowY !== "auto" || getComputedStyle(preview).resize !== "vertical") {
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, error: "A long rendered preview did not automatically follow the latest content (bottom gap " + previewBottomGap + "px)." };
+        }
+        editor.setSelectionRange(editor.value.length, editor.value.length);
+        const calloutButton = document.querySelector(".insert-callout-button");
+        if (!calloutButton) return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, autoScrollingPreview: true, error: "The callout shortcut button was not rendered." };
+        calloutButton.click();
+        const calloutStartedAt = Date.now();
+        while (!document.querySelector('.note-preview .callout[data-callout="note"]') && Date.now() - calloutStartedAt < 3000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        const renderedCallout = document.querySelector('.note-preview .callout[data-callout="note"]');
+        const calloutTitle = renderedCallout?.querySelector(".callout-title")?.textContent?.trim();
+        if (!editor.value.includes("> [!note] Note") || !renderedCallout || calloutTitle !== "Note" || renderedCallout.textContent?.includes("[!note]") || parseFloat(getComputedStyle(renderedCallout).borderLeftWidth) < 3) {
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, autoScrollingPreview: true, error: "The callout shortcut did not produce an Obsidian-style rendered callout." };
         }
         document.querySelector(".back-to-notes")?.click();
         const structureStartedAt = Date.now();
@@ -212,7 +225,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, chapterGrouping: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, autoScrollingPreview: true, obsidianCallouts: true, chapterGrouping: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }

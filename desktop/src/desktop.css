@@ -13,6 +13,10 @@ button, a, input, textarea, label { -webkit-app-region: no-drag; }
 .book-cover { width: 100%; border: 0; cursor: pointer; }
 .latex-suite-status { display: flex; align-items: center; gap: .35rem; margin: 0 0 .45rem; padding: .4rem .55rem; border: 1px solid #d8e2dc; border-radius: .4rem; background: #f5faf7; color: #42695b; font-size: .58rem; line-height: 1.3; }
 .latex-suite-status > span { font-size: .72rem; }
+.note-input-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: .4rem; margin-bottom: .45rem; }
+.note-input-tools .latex-suite-status { min-width: 0; margin: 0; }
+.insert-callout-button { padding: .35rem .6rem; border: 1px solid #c9d8d0; border-radius: .4rem; background: #edf6f1; color: #315f50; cursor: pointer; font-size: calc(.68rem * var(--notes-font-scale, 1)); font-weight: 700; white-space: nowrap; }
+.insert-callout-button:hover, .insert-callout-button:focus-visible { border-color: var(--sage); background: var(--sage); color: white; outline: none; }
 .pdf-stage { overscroll-behavior: contain; }
 
 /* The notebook is a reading and writing surface, so keep its type comfortably legible. */
