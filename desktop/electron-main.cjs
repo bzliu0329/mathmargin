@@ -91,6 +91,11 @@ async function runUploadSmokeTest(window) {
         const editorView = editorHost?.mathMarginEditorView;
         const editor = editorView?.contentDOM;
         if (!editorView || !editor) return { ok: false, uploaded: true, rendered: true, error: "The live note editor could not be created." };
+        const selectedHighlight = document.querySelector(".annotation-mark.text.selected");
+        const selectedHighlightStyle = selectedHighlight ? getComputedStyle(selectedHighlight) : null;
+        if (!selectedHighlightStyle || selectedHighlightStyle.outlineStyle !== "none" || parseFloat(selectedHighlightStyle.borderTopWidth) > 0 || parseFloat(selectedHighlightStyle.borderRightWidth) > 0 || parseFloat(selectedHighlightStyle.borderBottomWidth) > 0 || parseFloat(selectedHighlightStyle.borderLeftWidth) > 0) {
+          return { ok: false, uploaded: true, rendered: true, error: "Selected text highlights still displayed dark border lines." };
+        }
         const setEditorValue = (value, position = value.length) => editorView.dispatch({ changes: { from: 0, to: editorView.state.doc.length, insert: value }, selection: { anchor: position }, scrollIntoView: true });
         const editorValue = () => editorView.state.doc.toString();
         setEditorValue("m");
@@ -169,6 +174,18 @@ async function runUploadSmokeTest(window) {
         if (!detectedChapterTitle?.startsWith("Chapter 1 ·") || !detectedSectionTitle?.startsWith("Section 1.1 ·")) {
           return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, chapterGrouping: true, emptySectionsVisible: true, error: "Chapter and section numbers were not shown explicitly." };
         }
+        const chapterHeading = document.querySelector("button.annotation-chapter-heading");
+        const sectionHeading = document.querySelector("button.annotation-section-heading");
+        const pageInput = document.querySelector(".page-controls input");
+        if (!chapterHeading?.dataset.pageNumber || !sectionHeading?.dataset.pageNumber || !pageInput) {
+          return { ok: false, uploaded: true, rendered: true, chapterGrouping: true, error: "Chapter and section headings were not page-navigation controls." };
+        }
+        chapterHeading.click();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (pageInput.value !== chapterHeading.dataset.pageNumber) return { ok: false, uploaded: true, rendered: true, chapterGrouping: true, error: "Clicking a chapter heading did not jump to its page." };
+        sectionHeading.click();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (pageInput.value !== sectionHeading.dataset.pageNumber) return { ok: false, uploaded: true, rendered: true, chapterGrouping: true, error: "Clicking a section heading did not jump to its page." };
         const areaTool = [...document.querySelectorAll(".tool-group button")].find(button => button.textContent?.includes("Area"));
         areaTool?.click();
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -221,7 +238,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, inlineLatex: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
