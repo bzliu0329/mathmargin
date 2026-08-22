@@ -160,10 +160,36 @@ async function runUploadSmokeTest(window) {
         if (!detectedChapterTitle?.startsWith("Chapter 1 ·") || !detectedSectionTitle?.startsWith("Section 1.1 ·")) {
           return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, chapterGrouping: true, emptySectionsVisible: true, error: "Chapter and section numbers were not shown explicitly." };
         }
-        [...document.querySelectorAll(".tool-group button")].find(button => button.textContent?.includes("Area"))?.click();
+        const areaTool = [...document.querySelectorAll(".tool-group button")].find(button => button.textContent?.includes("Area"));
+        areaTool?.click();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const interaction = document.querySelector(".area-interaction");
+        const interactionBounds = interaction?.getBoundingClientRect();
+        if (!interaction || !interactionBounds) return { ok: false, uploaded: true, rendered: true, error: "The area drawing tool was not available." };
+        const areaStart = { x: interactionBounds.left + interactionBounds.width * .2, y: interactionBounds.top + interactionBounds.height * .2 };
+        const areaEnd = { x: interactionBounds.left + interactionBounds.width * .4, y: interactionBounds.top + interactionBounds.height * .38 };
+        interaction.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 17, pointerType: "mouse", buttons: 1, clientX: areaStart.x, clientY: areaStart.y }));
+        interaction.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, cancelable: true, pointerId: 17, pointerType: "mouse", buttons: 1, clientX: areaEnd.x, clientY: areaEnd.y }));
+        interaction.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 17, pointerType: "mouse", buttons: 0, clientX: areaEnd.x, clientY: areaEnd.y }));
+        await new Promise(resolve => setTimeout(resolve, 150));
+        const annotateArea = [...document.querySelectorAll(".draft-actions button")].find(button => button.textContent?.includes("Annotate area"));
+        if (!annotateArea) return { ok: false, uploaded: true, rendered: true, error: "A valid area selection did not show its save action." };
+        annotateArea.click();
+        const savedAreaStartedAt = Date.now();
+        while ((!document.querySelector(".annotation-mark.area") || !document.querySelector(".area-resize-handle.se")) && Date.now() - savedAreaStartedAt < 5000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        const savedArea = document.querySelector(".annotation-mark.area");
+        const southeastHandle = document.querySelector(".area-resize-handle.se");
+        if (!savedArea || !southeastHandle) return { ok: false, uploaded: true, rendered: true, error: "A saved area did not expose resize handles when selected." };
+        const areaWidthBefore = savedArea.getBoundingClientRect().width;
+        southeastHandle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", shiftKey: true, bubbles: true, cancelable: true }));
+        await new Promise(resolve => setTimeout(resolve, 200));
+        const areaWidthAfter = document.querySelector(".annotation-mark.area")?.getBoundingClientRect().width ?? 0;
+        if (areaWidthAfter <= areaWidthBefore) return { ok: false, uploaded: true, rendered: true, error: "The saved area did not resize (" + areaWidthBefore + "px to " + areaWidthAfter + "px)." };
         document.querySelector(".notes-header > button")?.click();
         await new Promise(resolve => setTimeout(resolve, 400));
-        const mark = document.querySelector(".annotation-mark");
+        const mark = document.querySelector(".annotation-mark.area");
         const markBounds = mark?.getBoundingClientRect();
         if (!markBounds || !document.querySelector(".area-interaction")) return { ok: false, uploaded: true, rendered: true, error: "The annotation overlay click test could not start." };
         const hitTarget = document.elementFromPoint(markBounds.left + markBounds.width / 2, markBounds.top + markBounds.height / 2);
@@ -171,6 +197,7 @@ async function runUploadSmokeTest(window) {
         hitTarget.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
         await new Promise(resolve => setTimeout(resolve, 200));
         if (!document.querySelector(".reader-shell")?.classList.contains("sidebar-is-open")) return { ok: false, uploaded: true, rendered: true, error: "Clicking the saved annotation did not open the sidebar." };
+        if (!document.querySelector(".area-resize-handle")) return { ok: false, uploaded: true, rendered: true, error: "Reselecting a saved area did not restore its resize handles." };
         location.hash = "";
         const libraryStartedAt = Date.now();
         while (!document.querySelector(".desktop-library") && Date.now() - libraryStartedAt < 5000) {
@@ -185,7 +212,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, chapterGrouping: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, chapterGrouping: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
