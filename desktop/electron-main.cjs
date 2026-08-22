@@ -84,35 +84,33 @@ async function runUploadSmokeTest(window) {
         selection?.addRange(range);
         document.querySelector(".pdf-page-wrap")?.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
         const editorStartedAt = Date.now();
-        while (!document.querySelector(".note-editor textarea") && Date.now() - editorStartedAt < 5000) {
+        while (!document.querySelector(".live-note-editor")?.mathMarginEditorView && Date.now() - editorStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        const editor = document.querySelector(".note-editor textarea");
-        if (!editor) return { ok: false, uploaded: true, rendered: true, error: "A text annotation could not be created." };
-        const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-        valueSetter?.call(editor, "m");
-        editor.dispatchEvent(new Event("input", { bubbles: true }));
+        const editorHost = document.querySelector(".live-note-editor");
+        const editorView = editorHost?.mathMarginEditorView;
+        const editor = editorView?.contentDOM;
+        if (!editorView || !editor) return { ok: false, uploaded: true, rendered: true, error: "The live note editor could not be created." };
+        const setEditorValue = (value, position = value.length) => editorView.dispatch({ changes: { from: 0, to: editorView.state.doc.length, insert: value }, selection: { anchor: position }, scrollIntoView: true });
+        const editorValue = () => editorView.state.doc.toString();
+        setEditorValue("m");
         await new Promise(resolve => setTimeout(resolve, 100));
-        editor.setSelectionRange(1, 1);
         editor.dispatchEvent(new KeyboardEvent("keydown", { key: "k", bubbles: true, cancelable: true }));
         await new Promise(resolve => setTimeout(resolve, 100));
-        if (editor.value !== "$$") return { ok: false, uploaded: true, rendered: true, error: "The mk shortcut produced " + JSON.stringify(editor.value) + "." };
-        valueSetter?.call(editor, "$@$");
-        editor.dispatchEvent(new Event("input", { bubbles: true }));
+        if (editorValue() !== "$$") return { ok: false, uploaded: true, rendered: true, error: "The mk shortcut produced " + JSON.stringify(editorValue()) + "." };
+        setEditorValue("$@$", 2);
         await new Promise(resolve => setTimeout(resolve, 100));
-        editor.setSelectionRange(2, 2);
         editor.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
         await new Promise(resolve => setTimeout(resolve, 100));
-        if (editor.value !== "$\\\\alpha$") return { ok: false, uploaded: true, rendered: true, error: "The @a shortcut produced " + JSON.stringify(editor.value) + "." };
-        valueSetter?.call(editor, "Before $$x^2$$ after");
-        editor.dispatchEvent(new Event("input", { bubbles: true }));
+        if (editorValue() !== "$\\\\alpha$") return { ok: false, uploaded: true, rendered: true, error: "The @a shortcut produced " + JSON.stringify(editorValue()) + "." };
+        setEditorValue("Before $$x^2$$ after");
         const displayMathStartedAt = Date.now();
-        while (!document.querySelector(".note-preview .katex-display") && Date.now() - displayMathStartedAt < 3000) {
+        while (!document.querySelector(".live-note-editor .cm-live-math-display .katex-display") && Date.now() - displayMathStartedAt < 3000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        const previewText = document.querySelector(".note-preview")?.textContent ?? "";
-        if (!document.querySelector(".note-preview .katex-display") || !previewText.includes("Before") || !previewText.includes("after")) {
-          return { ok: false, uploaded: true, rendered: true, shortcuts: true, error: "Double-dollar math did not render as a standalone block between Markdown text." };
+        const liveEditorText = editorHost.textContent ?? "";
+        if (!document.querySelector(".live-note-editor .cm-live-math-display .katex-display") || !liveEditorText.includes("Before") || !liveEditorText.includes("after") || document.querySelector(".note-preview")) {
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, error: "LaTeX was not rendered directly inside the single live note surface." };
         }
         const resizer = document.querySelector(".notes-resizer");
         const panel = document.querySelector(".notes-panel");
@@ -134,27 +132,25 @@ async function runUploadSmokeTest(window) {
           return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, error: "The annotation panel resize check failed (" + panelWidthBefore + "px to " + panelWidthAfter + "px; " + fontSizeBefore + "px to " + fontSizeAfter + "px; limit " + innerWidth / 2 + "px; inline " + readerBody?.style.gridTemplateColumns + "; computed " + (readerBody ? getComputedStyle(readerBody).gridTemplateColumns : "missing") + ")." };
         }
         const longNote = Array.from({ length: 36 }, (_, index) => "Paragraph " + (index + 1) + ": $x_{" + (index + 1) + "}^2$").join("\\n\\n");
-        valueSetter?.call(editor, longNote);
-        editor.dispatchEvent(new Event("input", { bubbles: true }));
+        editorView.focus();
+        setEditorValue(longNote);
         await new Promise(resolve => setTimeout(resolve, 200));
-        const preview = document.querySelector(".note-preview");
-        if (!preview) return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, error: "The rendered preview was not available for its scroll test." };
-        const previewBottomGap = preview.scrollHeight - preview.clientHeight - preview.scrollTop;
-        if (preview.scrollHeight <= preview.clientHeight || preview.scrollTop <= 0 || previewBottomGap > 2 || getComputedStyle(preview).overflowY !== "auto" || getComputedStyle(preview).resize !== "vertical") {
-          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, error: "A long rendered preview did not automatically follow the latest content (bottom gap " + previewBottomGap + "px)." };
+        const editorScroller = document.querySelector(".live-note-editor .cm-scroller");
+        if (!editorScroller) return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, error: "The live note scroller was unavailable." };
+        const editorBottomGap = editorScroller.scrollHeight - editorScroller.clientHeight - editorScroller.scrollTop;
+        if (editorScroller.scrollHeight <= editorScroller.clientHeight || editorScroller.scrollTop <= 0 || editorBottomGap > 4) {
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, error: "The live note editor did not follow the caret as the note grew (bottom gap " + editorBottomGap + "px)." };
         }
-        editor.setSelectionRange(editor.value.length, editor.value.length);
         const calloutButton = document.querySelector(".insert-callout-button");
-        if (!calloutButton) return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, autoScrollingPreview: true, error: "The callout shortcut button was not rendered." };
+        if (!calloutButton) return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, error: "The callout shortcut button was not rendered." };
         calloutButton.click();
         const calloutStartedAt = Date.now();
-        while (!document.querySelector('.note-preview .callout[data-callout="note"]') && Date.now() - calloutStartedAt < 3000) {
+        while (!document.querySelector('.live-note-editor .cm-callout[data-callout="note"]') && Date.now() - calloutStartedAt < 3000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        const renderedCallout = document.querySelector('.note-preview .callout[data-callout="note"]');
-        const calloutTitle = renderedCallout?.querySelector(".callout-title")?.textContent?.trim();
-        if (!editor.value.includes("> [!note] Note") || !renderedCallout || calloutTitle !== "Note" || renderedCallout.textContent?.includes("[!note]") || parseFloat(getComputedStyle(renderedCallout).borderLeftWidth) < 3) {
-          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, autoScrollingPreview: true, error: "The callout shortcut did not produce an Obsidian-style rendered callout." };
+        const renderedCallout = document.querySelector('.live-note-editor .cm-callout[data-callout="note"]');
+        if (!editorValue().includes("> [!note] Note") || !renderedCallout || !document.querySelector(".cm-callout-marker") || renderedCallout.textContent?.includes("[!note]") || parseFloat(getComputedStyle(renderedCallout).borderLeftWidth) < 3) {
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, error: "The callout shortcut did not render inside the live note editor." };
         }
         document.querySelector(".back-to-notes")?.click();
         const structureStartedAt = Date.now();
@@ -162,16 +158,16 @@ async function runUploadSmokeTest(window) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
         if (!document.querySelector(".annotation-chapter-heading") || !document.querySelector(".annotation-section-heading") || !document.querySelector(".notes-list .note-card")) {
-          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, error: "All annotations were not grouped into a chapter and section." };
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, error: "All annotations were not grouped into a chapter and section." };
         }
         const emptySectionCounts = [...document.querySelectorAll(".annotation-section-heading small")].filter(element => element.textContent?.trim() === "0 notes");
         if (!emptySectionCounts.length || !document.querySelector(".empty-section-notes")) {
-          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, chapterGrouping: true, error: "Detected sections without annotations were hidden from All annotations." };
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, chapterGrouping: true, error: "Detected sections without annotations were hidden from All annotations." };
         }
         const detectedChapterTitle = document.querySelector(".annotation-chapter-heading strong")?.textContent?.trim();
         const detectedSectionTitle = document.querySelector(".annotation-section-heading > span")?.textContent?.trim();
         if (!detectedChapterTitle?.startsWith("Chapter 1 ·") || !detectedSectionTitle?.startsWith("Section 1.1 ·")) {
-          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, chapterGrouping: true, emptySectionsVisible: true, error: "Chapter and section numbers were not shown explicitly." };
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, chapterGrouping: true, emptySectionsVisible: true, error: "Chapter and section numbers were not shown explicitly." };
         }
         const areaTool = [...document.querySelectorAll(".tool-group button")].find(button => button.textContent?.includes("Area"));
         areaTool?.click();
@@ -225,7 +221,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, displayMath: true, resizablePanel: true, scrollablePreview: true, autoScrollingPreview: true, obsidianCallouts: true, chapterGrouping: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, shortcuts: true, inlineLatex: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }

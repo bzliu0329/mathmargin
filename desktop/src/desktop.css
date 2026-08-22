@@ -17,6 +17,33 @@ button, a, input, textarea, label { -webkit-app-region: no-drag; }
 .note-input-tools .latex-suite-status { min-width: 0; margin: 0; }
 .insert-callout-button { padding: .35rem .6rem; border: 1px solid #c9d8d0; border-radius: .4rem; background: #edf6f1; color: #315f50; cursor: pointer; font-size: calc(.68rem * var(--notes-font-scale, 1)); font-weight: 700; white-space: nowrap; }
 .insert-callout-button:hover, .insert-callout-button:focus-visible { border-color: var(--sage); background: var(--sage); color: white; outline: none; }
+.live-note-editor { overflow: hidden; border: 1px solid #cfd6d1; border-radius: .55rem; background: #fbfbf8; box-shadow: inset 0 1px 2px rgba(31,41,38,.025); }
+.live-note-editor:focus-within { border-color: var(--sage); box-shadow: 0 0 0 3px rgba(52,94,81,.08); }
+.live-note-editor .cm-editor { height: clamp(20rem, 51vh, 36rem); background: transparent; color: var(--ink); font-size: calc(.9rem * var(--notes-font-scale, 1)); }
+.live-note-editor .cm-editor.cm-focused { outline: none; }
+.live-note-editor .cm-scroller { overflow: auto; overscroll-behavior: contain; font-family: var(--font-geist-sans), sans-serif; line-height: 1.68; scrollbar-gutter: stable; }
+.live-note-editor .cm-content { min-height: 100%; padding: 1rem .9rem 7rem; caret-color: var(--sage); }
+.live-note-editor .cm-line { padding: 0 .25rem; }
+.live-note-editor .cm-activeLine { background: rgba(67,112,94,.045); }
+.live-note-editor .cm-selectionBackground, .live-note-editor .cm-content ::selection { background: rgba(86,143,120,.2) !important; }
+.live-note-editor .cm-gutters { display: none; }
+.live-note-editor .cm-placeholder { color: #99a39e; font-style: italic; }
+.cm-live-math { color: var(--ink); cursor: text; }
+.cm-live-math-inline { display: inline-flex; align-items: baseline; margin: 0 .08em; padding: 0 .08em; }
+.cm-live-math-display { display: block; margin: .55rem .25rem; padding: .65rem .8rem; overflow-x: auto; border-radius: .35rem; background: rgba(255,255,255,.72); text-align: center; }
+.cm-live-math-error { border-bottom: 2px wavy #bf584d; color: #a84840; font-family: var(--font-geist-mono), monospace; }
+.live-note-editor .cm-callout { --cm-callout-rgb: 68, 138, 255; padding-right: .55rem; padding-left: .65rem; border-left: .25rem solid rgb(var(--cm-callout-rgb)); background: rgba(var(--cm-callout-rgb), .1); }
+.live-note-editor .cm-callout-title-line { padding-top: .45rem; color: rgb(var(--cm-callout-rgb)); font-weight: 750; }
+.live-note-editor .cm-callout-body-line { padding-bottom: .15rem; }
+.live-note-editor .cm-callout-marker { color: rgb(var(--cm-callout-rgb)); font-family: var(--font-geist-sans), sans-serif; font-weight: 800; }
+.live-note-editor .cm-callout-abstract, .live-note-editor .cm-callout-summary, .live-note-editor .cm-callout-tldr { --cm-callout-rgb: 0, 176, 255; }
+.live-note-editor .cm-callout-tip, .live-note-editor .cm-callout-hint, .live-note-editor .cm-callout-important { --cm-callout-rgb: 0, 155, 158; }
+.live-note-editor .cm-callout-success, .live-note-editor .cm-callout-check, .live-note-editor .cm-callout-done { --cm-callout-rgb: 8, 155, 70; }
+.live-note-editor .cm-callout-question, .live-note-editor .cm-callout-help, .live-note-editor .cm-callout-faq { --cm-callout-rgb: 206, 139, 0; }
+.live-note-editor .cm-callout-warning, .live-note-editor .cm-callout-caution, .live-note-editor .cm-callout-attention { --cm-callout-rgb: 220, 104, 0; }
+.live-note-editor .cm-callout-failure, .live-note-editor .cm-callout-fail, .live-note-editor .cm-callout-missing, .live-note-editor .cm-callout-danger, .live-note-editor .cm-callout-error, .live-note-editor .cm-callout-bug { --cm-callout-rgb: 211, 57, 70; }
+.live-note-editor .cm-callout-example { --cm-callout-rgb: 112, 78, 210; }
+.live-note-editor .cm-callout-quote, .live-note-editor .cm-callout-cite { --cm-callout-rgb: 112, 119, 116; }
 .pdf-stage { overscroll-behavior: contain; }
 
 /* The notebook is a reading and writing surface, so keep its type comfortably legible. */
