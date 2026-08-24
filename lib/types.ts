@@ -34,6 +34,7 @@ export type AnnotationRecord = {
   selectedText: string | null;
   bodyMarkdown: string;
   color: AnnotationColor;
+  linkedAnnotationIds?: string[];
   createdAt: string;
   updatedAt: string;
 };

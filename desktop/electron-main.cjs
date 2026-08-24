@@ -209,27 +209,82 @@ async function runUploadSmokeTest(window) {
         const southeastHandle = document.querySelector(".area-resize-handle.se");
         if (!savedArea || !southeastHandle) return { ok: false, uploaded: true, rendered: true, error: "A saved area did not expose resize handles when selected." };
         const areaWidthBefore = savedArea.getBoundingClientRect().width;
-        southeastHandle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", shiftKey: true, bubbles: true, cancelable: true }));
-        await new Promise(resolve => setTimeout(resolve, 200));
+        const resizeHandleBounds = southeastHandle.getBoundingClientRect();
+        const resizeX = resizeHandleBounds.left + resizeHandleBounds.width / 2;
+        const resizeY = resizeHandleBounds.top + resizeHandleBounds.height / 2;
+        southeastHandle.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 29, pointerType: "mouse", buttons: 1, clientX: resizeX, clientY: resizeY }));
+        southeastHandle.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, cancelable: true, pointerId: 29, pointerType: "mouse", buttons: 1, clientX: resizeX + 25, clientY: resizeY }));
+        southeastHandle.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: 29, pointerType: "mouse", buttons: 0, clientX: resizeX + 25, clientY: resizeY }));
+        const resizeAreaStartedAt = Date.now();
+        while ((document.querySelector(".annotation-mark.area")?.getBoundingClientRect().width ?? 0) <= areaWidthBefore && Date.now() - resizeAreaStartedAt < 3000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
         const areaWidthAfter = document.querySelector(".annotation-mark.area")?.getBoundingClientRect().width ?? 0;
         if (areaWidthAfter <= areaWidthBefore) return { ok: false, uploaded: true, rendered: true, error: "The saved area did not resize (" + areaWidthBefore + "px to " + areaWidthAfter + "px)." };
+        const moveSurface = document.querySelector(".saved-area-move-surface");
+        const areaLeftBefore = document.querySelector(".annotation-mark.area")?.getBoundingClientRect().left ?? 0;
+        if (!moveSurface) return { ok: false, uploaded: true, rendered: true, areaResized: true, error: "The selected box did not expose a move surface." };
+        moveSurface.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", shiftKey: true, bubbles: true, cancelable: true }));
+        await new Promise(resolve => setTimeout(resolve, 200));
+        const areaLeftAfter = document.querySelector(".annotation-mark.area")?.getBoundingClientRect().left ?? 0;
+        if (areaLeftAfter <= areaLeftBefore) return { ok: false, uploaded: true, rendered: true, areaResized: true, error: "The saved area did not move (" + areaLeftBefore + "px to " + areaLeftAfter + "px)." };
+        const optionsTrigger = document.querySelector(".area-options-trigger");
+        if (!optionsTrigger) return { ok: false, uploaded: true, rendered: true, areaResized: true, areaMoved: true, error: "Selecting a box did not show its Options button." };
+        optionsTrigger.click();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const linkOption = [...document.querySelectorAll(".area-options-menu button")].find(button => button.textContent?.includes("Link annotation"));
+        const deleteOption = [...document.querySelectorAll(".area-options-menu button")].find(button => button.textContent?.trim() === "Delete box");
+        if (!linkOption || !deleteOption || document.querySelectorAll(".area-options-colors .color-dot").length !== 4) return { ok: false, uploaded: true, rendered: true, areaResized: true, areaMoved: true, error: "The box Options menu did not include link, color, and delete controls." };
+        linkOption.click();
+        const linkPickerStartedAt = Date.now();
+        while (!document.querySelector(".link-candidate-list button") && Date.now() - linkPickerStartedAt < 5000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        const currentDocumentId = location.hash.replace("#/reader/", "");
+        const linkCandidate = document.querySelector('.link-candidate-list button[data-document-id="' + CSS.escape(currentDocumentId ?? "") + '"][data-annotation-type="text"]');
+        if (!linkCandidate) return { ok: false, uploaded: true, rendered: true, areaMoved: true, boxOptions: true, error: "The annotation link picker did not list the existing highlight." };
+        linkCandidate.click();
+        const linkedStartedAt = Date.now();
+        while (!document.querySelector(".annotation-linked-item") && Date.now() - linkedStartedAt < 5000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        const linkedItem = document.querySelector(".annotation-linked-item > button:first-child");
+        if (!linkedItem) return { ok: false, uploaded: true, rendered: true, areaMoved: true, boxOptions: true, error: "The linked annotation was not shown after saving." };
+        linkedItem.click();
+        const linkedOpenStartedAt = Date.now();
+        while (!document.querySelector(".annotation-mark.text.selected") && Date.now() - linkedOpenStartedAt < 5000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        if (!document.querySelector(".annotation-mark.text.selected")) return { ok: false, uploaded: true, rendered: true, areaMoved: true, boxOptions: true, annotationsLinked: true, error: "Opening a linked annotation did not select its source highlight (page " + document.querySelector(".page-controls input")?.value + ", linked item " + linkedItem.textContent?.trim() + ", visible marks " + [...document.querySelectorAll(".annotation-mark")].map(mark => mark.className).join(" | ") + ")." };
+        document.querySelector(".annotation-mark.area")?.click();
+        await new Promise(resolve => setTimeout(resolve, 100));
         document.querySelector(".notes-header > button")?.click();
         await new Promise(resolve => setTimeout(resolve, 400));
         const mark = document.querySelector(".annotation-mark.area");
         const markBounds = mark?.getBoundingClientRect();
         if (!markBounds || !document.querySelector(".area-interaction")) return { ok: false, uploaded: true, rendered: true, error: "The annotation overlay click test could not start." };
         const hitTarget = document.elementFromPoint(markBounds.left + markBounds.width / 2, markBounds.top + markBounds.height / 2);
-        if (!hitTarget?.closest(".annotation-mark")) return { ok: false, uploaded: true, rendered: true, error: "The Area drawing layer covered the saved annotation." };
+        if (!hitTarget?.closest(".annotation-mark, .saved-area-move-surface")) return { ok: false, uploaded: true, rendered: true, error: "The Area drawing layer covered the saved annotation." };
         hitTarget.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
         await new Promise(resolve => setTimeout(resolve, 200));
         if (!document.querySelector(".reader-shell")?.classList.contains("sidebar-is-open")) return { ok: false, uploaded: true, rendered: true, error: "Clicking the saved annotation did not open the sidebar." };
         if (!document.querySelector(".area-resize-handle")) return { ok: false, uploaded: true, rendered: true, error: "Reselecting a saved area did not restore its resize handles." };
+        window.confirm = () => true;
+        document.querySelector(".area-options-trigger")?.click();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const deleteBox = [...document.querySelectorAll(".area-options-menu button")].find(button => button.textContent?.trim() === "Delete box");
+        if (!deleteBox) return { ok: false, uploaded: true, rendered: true, error: "The box delete option disappeared after reselecting it." };
+        deleteBox.click();
+        const deleteBoxStartedAt = Date.now();
+        while (document.querySelector(".annotation-mark.area") && Date.now() - deleteBoxStartedAt < 5000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        if (document.querySelector(".annotation-mark.area")) return { ok: false, uploaded: true, rendered: true, error: "Delete box did not remove the selected area." };
         location.hash = "";
         const libraryStartedAt = Date.now();
         while (!document.querySelector(".desktop-library") && Date.now() - libraryStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        window.confirm = () => true;
         for (const card of smokeCards()) {
           const buttons = [...card.querySelectorAll("button")];
           buttons.find(button => button.textContent?.trim() === "Delete")?.click();
@@ -238,7 +293,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, annotationClicked: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }

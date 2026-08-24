@@ -6,7 +6,9 @@ MathMargin is a local-first PDF reader for mathematical textbooks. It lets you h
 
 - Local PDF library with upload, rename, reopen, and delete
 - Selectable PDF text, page navigation, and touchpad/Ctrl-wheel zoom
-- Text highlights and resizable area annotations anchored through zoom changes
+- Text highlights and movable, resizable area annotations anchored through zoom changes
+- Contextual box options for color, linking, and deletion
+- Bidirectional annotation links within one textbook or across different books
 - One Obsidian-style live note editor with inline KaTeX rendering
 - LaTeX Suite-compatible shortcuts and snippet expansion
 - Obsidian callouts such as `> [!note]`, `> [!tip]`, and `> [!warning]`
@@ -42,7 +44,7 @@ npx tsc --noEmit
 npm run desktop:bundle
 ```
 
-The Electron smoke-test harness in `desktop/electron-main.cjs` validates PDF upload and reopening, PDF rendering and zooming, live LaTeX editing, LaTeX Suite shortcuts, callouts, autosave scrolling, chapter grouping, clickable overlays, and saved-area resizing.
+The Electron smoke-test harness in `desktop/electron-main.cjs` validates PDF upload and reopening, PDF rendering and zooming, live LaTeX editing, LaTeX Suite shortcuts, callouts, autosave scrolling, chapter grouping, clickable overlays, box moving/resizing/options/deletion, and annotation linking.
 
 ## Build the Windows app
 

@@ -64,12 +64,17 @@ export async function removeDocument(id: string) {
   const database = await openDatabase();
   const transaction = database.transaction(["documents", "annotations"], "readwrite");
   transaction.objectStore("documents").delete(id);
-  const index = transaction.objectStore("annotations").index("documentId");
-  const cursor = index.openCursor(IDBKeyRange.only(id));
-  cursor.onsuccess = () => {
-    const match = cursor.result;
-    if (match) { match.delete(); match.continue(); }
-  };
+  const annotationStore = transaction.objectStore("annotations");
+  const annotations = await requestResult(annotationStore.getAll()) as AnnotationRecord[];
+  const removedIds = new Set(annotations.filter((annotation) => annotation.documentId === id).map((annotation) => annotation.id));
+  for (const annotation of annotations) {
+    if (removedIds.has(annotation.id)) {
+      annotationStore.delete(annotation.id);
+      continue;
+    }
+    const linkedAnnotationIds = annotation.linkedAnnotationIds?.filter((linkedId) => !removedIds.has(linkedId));
+    if (linkedAnnotationIds?.length !== annotation.linkedAnnotationIds?.length) annotationStore.put({ ...annotation, linkedAnnotationIds, updatedAt: new Date().toISOString() });
+  }
   await transactionDone(transaction);
   database.close();
 }
@@ -80,6 +85,20 @@ export async function listAnnotations(documentId: string) {
   const values = await requestResult(index.getAll(IDBKeyRange.only(documentId))) as AnnotationRecord[];
   database.close();
   return values.sort((a, b) => a.pageNumber - b.pageNumber || a.createdAt.localeCompare(b.createdAt));
+}
+
+export async function listAllAnnotations() {
+  const database = await openDatabase();
+  const values = await requestResult(database.transaction("annotations", "readonly").objectStore("annotations").getAll()) as AnnotationRecord[];
+  database.close();
+  return values;
+}
+
+export async function getAnnotation(id: string) {
+  const database = await openDatabase();
+  const value = await requestResult(database.transaction("annotations", "readonly").objectStore("annotations").get(id)) as AnnotationRecord | undefined;
+  database.close();
+  return value;
 }
 
 export async function putAnnotation(annotation: AnnotationRecord) {
@@ -93,7 +112,13 @@ export async function putAnnotation(annotation: AnnotationRecord) {
 export async function removeAnnotation(id: string) {
   const database = await openDatabase();
   const transaction = database.transaction("annotations", "readwrite");
-  transaction.objectStore("annotations").delete(id);
+  const store = transaction.objectStore("annotations");
+  const annotations = await requestResult(store.getAll()) as AnnotationRecord[];
+  store.delete(id);
+  for (const annotation of annotations) {
+    if (!annotation.linkedAnnotationIds?.includes(id)) continue;
+    store.put({ ...annotation, linkedAnnotationIds: annotation.linkedAnnotationIds.filter((linkedId) => linkedId !== id), updatedAt: new Date().toISOString() });
+  }
   await transactionDone(transaction);
   database.close();
 }
