@@ -134,7 +134,7 @@ function DesktopLibrary({ onOpen }: { onOpen: (id: string) => void }) {
   async function upload(file?: File) {
     if (!file || uploading) return;
     setError("");
-    if (file.size > MAX_PDF_SIZE) return setError("This PDF is larger than the 75 MB limit.");
+    if (file.size > MAX_PDF_SIZE) return setError("This PDF is larger than the 120 MB limit.");
     if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) return setError("Choose a PDF file to continue.");
     setUploading(true);
     let stage = "reading the file";
@@ -176,7 +176,7 @@ function DesktopLibrary({ onOpen }: { onOpen: (id: string) => void }) {
     <section className="library-hero"><div><p className="eyebrow">Your mathematical reading room</p><h1>Read closely.<br />Think in the margins.</h1><p className="hero-copy">Upload a textbook, highlight the ideas that matter, and keep notes with beautifully rendered LaTeX right beside the page.</p></div><div>
       <label className={`upload-card ${dragging ? "is-dragging" : ""} ${uploading ? "is-uploading" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); upload(event.dataTransfer.files[0]); }}>
         <input ref={inputRef} type="file" accept="application/pdf,.pdf" onChange={(event) => upload(event.target.files?.[0])} />
-        <span className="upload-icon">{uploading ? "…" : "↑"}</span><strong>{uploading ? "Reading and saving your PDF…" : "Drop a PDF here"}</strong><span>{uploading ? "This can take a moment for a large textbook" : "or choose a file from your computer"}</span><small>PDF · up to 75 MB</small>
+        <span className="upload-icon">{uploading ? "…" : "↑"}</span><strong>{uploading ? "Reading and saving your PDF…" : "Drop a PDF here"}</strong><span>{uploading ? "This can take a moment for a large textbook" : "or choose a file from your computer"}</span><small>PDF · up to 120 MB</small>
       </label>{error && <div className="library-error" role="alert"><span>!</span>{error}<button onClick={() => setError("")}>×</button></div>}
     </div></section>
     <section className="books-section"><div className="section-heading"><div><p className="eyebrow">Local library</p><h2>Your textbooks</h2></div><span className="book-count">{documents.length} {documents.length === 1 ? "book" : "books"}</span></div>

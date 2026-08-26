@@ -30,7 +30,7 @@ export function LibraryClient() {
   async function upload(file?: File) {
     if (!file || uploading) return;
     setError("");
-    if (file.size > MAX_PDF_SIZE) return setError("This PDF is larger than the 75 MB limit.");
+    if (file.size > MAX_PDF_SIZE) return setError("This PDF is larger than the 120 MB limit.");
     if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) return setError("Choose a PDF file to continue.");
     setUploading(true);
     try {
@@ -108,7 +108,7 @@ export function LibraryClient() {
             <span className="upload-icon" aria-hidden="true">{uploading ? "…" : "↑"}</span>
             <strong>{uploading ? "Reading and saving your PDF…" : "Drop a PDF here"}</strong>
             <span>{uploading ? "This can take a moment for a large textbook" : "or choose a file from your computer"}</span>
-            <small>PDF · up to 75 MB</small>
+            <small>PDF · up to 120 MB</small>
           </label>
           {error && <div className="library-error" role="alert"><span>!</span>{error}<button onClick={() => setError("")} aria-label="Dismiss error">×</button></div>}
         </div>

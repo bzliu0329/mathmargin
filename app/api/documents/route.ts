@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File)) return Response.json({ error: "Choose a PDF to upload." }, { status: 400 });
-    if (file.size > MAX_PDF_SIZE) return Response.json({ error: "This PDF is larger than the 75 MB limit." }, { status: 413 });
+    if (file.size > MAX_PDF_SIZE) return Response.json({ error: "This PDF is larger than the 120 MB limit." }, { status: 413 });
     if (file.size < 5) return Response.json({ error: "This file is not a valid PDF." }, { status: 400 });
 
     const signature = new TextDecoder().decode(await file.slice(0, 5).arrayBuffer());

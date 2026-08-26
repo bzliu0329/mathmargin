@@ -40,4 +40,4 @@ export type AnnotationRecord = {
 };
 
 export const ANNOTATION_COLORS: AnnotationColor[] = ["sage", "gold", "rose", "blue"];
-export const MAX_PDF_SIZE = 75 * 1024 * 1024;
+export const MAX_PDF_SIZE = 120 * 1024 * 1024;

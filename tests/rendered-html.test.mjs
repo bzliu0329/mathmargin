@@ -40,6 +40,7 @@ test("keeps storage, annotation, and safety contracts in source", async () => {
   assert.match(hosting, /"r2": "FILES"/);
   assert.match(schema, /annotations_document_page_idx/);
   assert.match(library, /MAX_PDF_SIZE/);
+  assert.match(library, /120 MB/);
   assert.match(library, /password-protected/i);
   assert.match(reader, /remarkMath/);
   assert.match(reader, /rehypeKatex/);

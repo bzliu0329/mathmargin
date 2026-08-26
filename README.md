@@ -4,7 +4,7 @@ MathMargin is a local-first PDF reader for mathematical textbooks. It lets you h
 
 ## Features
 
-- Local PDF library with upload, rename, reopen, and delete
+- Local PDF library with upload (up to 120 MB), rename, reopen, and delete
 - Selectable PDF text, page navigation, and touchpad/Ctrl-wheel zoom
 - Text highlights and movable, resizable area annotations anchored through zoom changes
 - Contextual box options for color, linking, and deletion
