@@ -68,5 +68,10 @@ test("keeps desktop PDF folders and document types persistent", async () => {
   assert.match(desktop, /explorer-address-row/);
   assert.match(desktop, /application\/x-mathmargin-document-id/);
   assert.match(desktop, /dropDocumentIntoFolder/);
-  assert.match(desktop, /Its PDFs will be kept and moved to Unfiled/);
+  assert.match(desktop, /Import folder/);
+  assert.match(desktop, /webkitdirectory/);
+  assert.match(desktop, /folder-rename-dialog/);
+  assert.match(desktop, /folder-delete-dialog/);
+  assert.match(desktop, /folder-import-dialog/);
+  assert.match(desktop, /PDFs and all their annotations will be kept and moved to Unfiled/);
 });

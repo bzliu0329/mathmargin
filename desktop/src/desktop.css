@@ -23,6 +23,9 @@ body { -webkit-font-smoothing: antialiased; }
 .explorer-command-bar > button:disabled { opacity: .4; cursor: default; }
 .explorer-command-bar .primary-command { border-color: #c5d3cb; background: #eaf1ed; color: var(--sage); }
 .explorer-command-bar .primary-command > span { font-size: .95rem; }
+.explorer-command-bar .import-folder-command > span { font-size: .85rem; }
+.explorer-command-bar .rename-folder-command { border-color: #cad7d0; color: #35604f; }
+.explorer-command-bar .delete-folder-command { border-color: #e3c7c3; color: #99493f; }
 .command-folder-glyph, .tree-folder-glyph { position: relative; width: .95rem; height: .7rem; display: inline-block; border-radius: .1rem; background: #e9ba48; }
 .command-folder-glyph::before, .tree-folder-glyph::before { content: ""; position: absolute; left: .08rem; top: -.22rem; width: .42rem; height: .25rem; border-radius: .1rem .1rem 0 0; background: #e9ba48; }
 .command-divider { width: 1px; height: 1.4rem; margin: 0 .25rem; background: #d6dcd8; }
@@ -64,6 +67,14 @@ body { -webkit-font-smoothing: antialiased; }
 .file-manager-heading h3 { margin: 0; color: var(--ink); font: 650 .82rem/1.2 var(--font-geist-sans), sans-serif; }
 .file-manager-heading span { color: #89948e; font-size: .6rem; }
 .folder-icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: .65rem; }
+.library-folder-item { position: relative; min-width: 0; }
+.library-folder-item .library-folder-tile { width: 100%; height: 100%; }
+.folder-more-button { position: absolute; z-index: 3; top: .35rem; right: .35rem; width: 1.8rem; height: 1.55rem; padding: 0; border: 1px solid transparent; border-radius: .3rem; background: rgba(250,251,249,.82); color: #59675f; cursor: pointer; font-size: .63rem; letter-spacing: -.08em; opacity: 0; }
+.library-folder-item:hover .folder-more-button, .library-folder-item:focus-within .folder-more-button, .library-folder-item.menu-open .folder-more-button { opacity: 1; }
+.folder-more-button:hover, .folder-more-button:focus-visible { border-color: #c8d1cb; background: white; outline: none; }
+.folder-context-menu { position: absolute; z-index: 12; top: 2rem; right: .35rem; min-width: 8.5rem; display: grid; padding: .28rem; border: 1px solid #cbd2ce; border-radius: .42rem; background: white; box-shadow: 0 10px 30px rgba(25,37,31,.18); }
+.folder-context-menu button { padding: .48rem .6rem; border: 0; border-radius: .28rem; background: transparent; color: #46534c; cursor: pointer; font-size: .62rem; text-align: left; }
+.folder-context-menu button:hover { background: #edf2ef; }.folder-context-menu .danger-action { color: #9c493f; }
 .library-folder-tile { min-width: 0; min-height: 7.6rem; display: grid; justify-items: center; align-content: center; gap: .25rem; padding: .75rem .55rem; border: 1px solid #d4dbd6; border-radius: .65rem; background: #fafbf9; color: var(--ink); cursor: pointer; text-align: center; transition: border-color .15s, background .15s, box-shadow .15s, transform .15s; }
 .library-folder-tile:hover, .library-folder-tile:focus-visible { border-color: #9dac9f; outline: none; background: white; box-shadow: 0 7px 20px rgba(42,58,51,.09); transform: translateY(-2px); }
 .library-folder-tile.drop-target { border-color: #4f8068; outline: 3px solid rgba(76,132,104,.22); background: #eaf5ee; transform: translateY(-2px); }
@@ -80,6 +91,7 @@ body { -webkit-font-smoothing: antialiased; }
 .opened-folder-actions button { padding: 0; border: 0; background: transparent; color: #69766f; cursor: pointer; font-size: .59rem; font-weight: 700; }
 .opened-folder-actions button:hover { color: var(--sage); text-decoration: underline; }
 .opened-folder-actions .danger-action:hover { color: #a04d43; }
+.folder-management-hint { margin: .25rem 0 0; color: #76827b; font-size: .58rem; }
 .explorer-pane-heading { align-items: center; }
 .explorer-pane-heading h2 { margin: 0; font: 600 1.15rem/1.2 var(--font-geist-sans), sans-serif; }
 .document-type-badge { width: max-content; margin-bottom: .45rem; padding: .22rem .42rem; border-radius: 999px; background: #e6efe9; color: #3f695a; font-size: .53rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
@@ -115,6 +127,18 @@ body { -webkit-font-smoothing: antialiased; }
 .folder-create-form > input:focus { border-color: var(--sage); box-shadow: 0 0 0 3px rgba(52,94,81,.09); }
 .folder-dialog-error { padding: .5rem .6rem; border-radius: .4rem; background: #fff0ed; color: #9b433b; font-size: .62rem; }
 .modal-actions .confirm-folder-button { border-color: var(--sage); background: var(--sage); color: white; }
+.delete-folder-glyph { width: 2.5rem; height: 2.5rem; display: grid; place-items: center; margin-bottom: .7rem; border-radius: 50%; background: #f7dfdb; color: #a94d42; font-size: 1.15rem; font-weight: 850; }
+.modal-actions .confirm-delete-folder-button { border-color: #a84d43; background: #a84d43; color: white; }
+.folder-import-dialog { width: min(36rem, calc(100vw - 4rem)); }
+.folder-import-summary { display: flex; gap: .55rem; margin: .85rem 0; }
+.folder-import-summary span { padding: .45rem .6rem; border-radius: .4rem; background: #edf4ef; color: #486458; font-size: .62rem; }
+.folder-import-summary span.warning { background: #fff1dc; color: #8b6126; }
+.folder-import-type > span { display: block; margin-bottom: .45rem; color: #59665f; font-size: .64rem; font-weight: 750; }
+.folder-import-dialog .document-type-option { min-height: 6.7rem; }
+.folder-import-progress { position: relative; height: .35rem; margin: 1rem 0 2rem; border-radius: 999px; background: #dfe5e1; }
+.folder-import-progress > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--sage); transition: width .15s; }
+.folder-import-progress small { position: absolute; top: .6rem; left: 0; color: #6d7972; font-size: .58rem; }
+.modal-actions .confirm-folder-import-button { border-color: var(--sage); background: var(--sage); color: white; }
 .modal-actions button:disabled { opacity: .5; cursor: default; }
 @media (max-width: 920px) { .library-workspace { grid-template-columns: 11rem minmax(0, 1fr); gap: 1rem; } .library-folders { padding: .65rem; } }
 .desktop-drag-region { -webkit-app-region: drag; }

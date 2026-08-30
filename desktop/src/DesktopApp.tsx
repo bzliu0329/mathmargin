@@ -199,6 +199,13 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [folderError, setFolderError] = useState("");
+  const [folderBeingRenamed, setFolderBeingRenamed] = useState<LibraryFolder | null>(null);
+  const [folderPendingDelete, setFolderPendingDelete] = useState<LibraryFolder | null>(null);
+  const [folderMenuId, setFolderMenuId] = useState("");
+  const [pendingFolderImport, setPendingFolderImport] = useState<{ name: string; files: File[] } | null>(null);
+  const [folderImportType, setFolderImportType] = useState<DocumentType>("textbook");
+  const [folderImporting, setFolderImporting] = useState(false);
+  const [folderImportProgress, setFolderImportProgress] = useState(0);
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [explorerLayout, setExplorerLayout] = useState<"icons" | "details">(() => localStorage.getItem(EXPLORER_LAYOUT_KEY) === "details" ? "details" : "icons");
@@ -208,6 +215,7 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
   const [draggedId, setDraggedId] = useState("");
   const [dropTargetId, setDropTargetId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     Promise.all([listDocuments(), listFolders()]).then(([savedDocuments, savedFolders]) => {
@@ -215,6 +223,7 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
     }).catch((cause) => setError(message(cause, "Your library could not be opened."))).finally(() => setLoading(false));
   }, []);
   useEffect(() => { localStorage.setItem(EXPLORER_LAYOUT_KEY, explorerLayout); }, [explorerLayout]);
+  useEffect(() => { folderInputRef.current?.setAttribute("webkitdirectory", ""); }, []);
 
   function chooseUpload(file?: File, destinationFolderId?: string) {
     if (!file || uploading) return;
@@ -270,21 +279,64 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
 
   function openFolderCreator() { setFolderName(""); setFolderError(""); setCreatingFolder(true); }
 
-  async function renameFolder(folder: LibraryFolder) {
-    const name = prompt("Rename folder", folder.name)?.trim(); if (!name || name === folder.name) return;
+  function openFolderRenamer(folder: LibraryFolder) { setFolderMenuId(""); setFolderName(folder.name); setFolderError(""); setFolderBeingRenamed(folder); }
+
+  async function renameFolder() {
+    const folder = folderBeingRenamed; const name = folderName.trim(); if (!folder || !name) return;
+    if (name === folder.name) { setFolderBeingRenamed(null); return; }
     const updated = { ...folder, name: name.slice(0, 80), updatedAt: new Date().toISOString() };
-    try { await putFolder(updated); setFolders((current) => current.map((item) => item.id === folder.id ? updated : item)); }
-    catch (cause) { setError(message(cause, "The folder could not be renamed.")); }
+    try { await putFolder(updated); setFolders((current) => current.map((item) => item.id === folder.id ? updated : item)); setFolderBeingRenamed(null); setFolderName(""); }
+    catch (cause) { setFolderError(message(cause, "The folder could not be renamed.")); }
   }
 
   async function discardFolder(folder: LibraryFolder) {
-    if (!confirm(`Delete the folder “${folder.name}”? Its PDFs will be kept and moved to Unfiled.`)) return;
     try {
       await removeFolder(folder.id);
       setFolders((current) => current.filter((item) => item.id !== folder.id));
       setDocuments((current) => current.map((document) => document.folderId === folder.id ? { ...document, folderId: null, updatedAt: new Date().toISOString() } : document));
       if (libraryView === `folder:${folder.id}`) setLibraryView("unfiled");
+      setFolderPendingDelete(null); setFolderMenuId("");
     } catch (cause) { setError(message(cause, "The folder could not be deleted.")); }
+  }
+
+  function chooseFolderImport(files?: FileList | null) {
+    const selected = [...(files ?? [])];
+    const pdfFiles = selected.filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
+    if (!pdfFiles.length) { setError("That folder does not contain any PDF files."); if (folderInputRef.current) folderInputRef.current.value = ""; return; }
+    const sourceName = pdfFiles[0].webkitRelativePath.split("/")[0]?.trim() || "Imported PDFs";
+    let name = sourceName; let suffix = 2;
+    while (folders.some((folder) => folder.name.localeCompare(name, undefined, { sensitivity: "accent" }) === 0)) name = `${sourceName} (${suffix++})`;
+    setPendingFolderImport({ name, files: selected }); setFolderImportType("textbook"); setFolderImportProgress(0); setError("");
+  }
+
+  async function importFolder() {
+    const pending = pendingFolderImport; if (!pending || folderImporting) return;
+    const pdfFiles = pending.files.filter((file) => (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) && file.size <= MAX_PDF_SIZE);
+    if (!pdfFiles.length) { setError("Every PDF in that folder is larger than the 120 MB limit."); setPendingFolderImport(null); return; }
+    setFolderImporting(true); setFolderImportProgress(0);
+    const now = new Date().toISOString();
+    const folder: LibraryFolder = { id: crypto.randomUUID(), name: pending.name.slice(0, 80), createdAt: now, updatedAt: now, libraryOrder: folders.length };
+    const added: LocalDocument[] = [];
+    let failed = pending.files.length - pdfFiles.length;
+    try {
+      await putFolder(folder);
+      for (let index = 0; index < pdfFiles.length; index++) {
+        const file = pdfFiles[index]; setFolderImportProgress(index + 1);
+        try {
+          const data = await file.arrayBuffer();
+          const pdf = await pdfjs.getDocument({ data: data.slice(0) }).promise;
+          const relativeName = file.webkitRelativePath.split("/").slice(1).join(" / ") || file.name;
+          added.push({ id: crypto.randomUUID(), title: relativeName.replace(/\.pdf$/i, ""), originalFilename: file.name, fileSize: file.size, pageCount: pdf.numPages, createdAt: now, updatedAt: now, lastOpenedAt: now, libraryOrder: index, documentType: folderImportType, folderId: folder.id, file: data });
+          await pdf.destroy();
+        } catch { failed++; }
+      }
+      if (!added.length) { await removeFolder(folder.id); throw new Error("None of the PDFs in that folder could be read."); }
+      const reordered = [...added, ...documents].map((document, index) => ({ ...document, libraryOrder: index }));
+      await Promise.all(reordered.map(putDocument));
+      setFolders((current) => [...current, folder]); setDocuments(reordered); setLibraryView(`folder:${folder.id}`); setSelectedDocumentId(""); setSearchQuery("");
+      setPendingFolderImport(null); if (failed) setError(`${added.length} PDFs imported. ${failed} unsupported, oversized, password-protected, or invalid files were skipped.`);
+    } catch (cause) { setError(message(cause, "The folder could not be imported.")); }
+    finally { setFolderImporting(false); setFolderImportProgress(0); if (folderInputRef.current) folderInputRef.current.value = ""; }
   }
 
   async function moveDocument(document: LocalDocument, folderId: string) {
@@ -340,6 +392,8 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
   const viewTitle = selectedFolder?.name ?? (libraryView === "textbooks" ? "Textbooks" : libraryView === "problem-sets" ? "Problem sets" : libraryView === "unfiled" ? "Unfiled PDFs" : "All PDFs");
   const selectedDocument = documents.find((document) => document.id === selectedDocumentId);
   const visibleFolders = folders.filter((folder) => !query || folder.name.toLowerCase().includes(query));
+  const pendingImportPdfs = pendingFolderImport?.files.filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) ?? [];
+  const pendingImportEligible = pendingImportPdfs.filter((file) => file.size <= MAX_PDF_SIZE);
   function selectView(view: string) { setLibraryView(view); setSelectedDocumentId(""); setSearchQuery(""); }
   function startDocumentDrag(event: DragEvent, document: LocalDocument) {
     setDraggedId(document.id); setSelectedDocumentId(document.id); event.dataTransfer.effectAllowed = "move";
@@ -353,12 +407,14 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
   return <main className="library-shell desktop-library">
     <header className="library-header desktop-drag-region"><div className="brand"><span className="brand-mark">M</span><span>MathMargin</span></div><span className="desktop-local-pill">Stored locally · works offline</span></header>
     <input ref={inputRef} className="explorer-file-input" type="file" accept="application/pdf,.pdf" onChange={(event) => chooseUpload(event.target.files?.[0])} />
+    <input ref={folderInputRef} className="explorer-file-input explorer-folder-input" type="file" accept="application/pdf,.pdf" multiple onChange={(event) => chooseFolderImport(event.target.files)} />
     <section className="explorer-command-bar" aria-label="Library commands">
       <button type="button" className="primary-command" onClick={() => inputRef.current?.click()} disabled={uploading}><span>＋</span>{uploading ? "Adding PDF…" : "Add PDF"}</button>
-      <button type="button" onClick={openFolderCreator}><span className="command-folder-glyph" />New folder</button><span className="command-divider" />
+      <button type="button" onClick={openFolderCreator}><span className="command-folder-glyph" />New folder</button><button type="button" className="import-folder-command" onClick={() => folderInputRef.current?.click()} disabled={folderImporting}><span>⇩</span>Import folder</button><span className="command-divider" />
       <button type="button" disabled={!selectedDocument} onClick={() => { if (selectedDocument) { setEditingId(selectedDocument.id); setDraftTitle(selectedDocument.title); } }}>Rename</button>
       <button type="button" disabled={!selectedDocument} onClick={() => { if (selectedDocument) void discard(selectedDocument); }}>Delete</button>
       <button type="button" disabled={!selectedDocument} onClick={() => { if (selectedDocument) onOpen(selectedDocument); }}>Open</button>
+      {selectedFolder && <><span className="command-divider" /><button type="button" className="rename-folder-command" onClick={() => openFolderRenamer(selectedFolder)}>Rename folder</button><button type="button" className="delete-folder-command" onClick={() => setFolderPendingDelete(selectedFolder)}>Delete folder</button></>}
       <span className="command-spacer" /><div className="explorer-view-toggle" aria-label="Layout"><button type="button" className={explorerLayout === "icons" ? "active" : ""} onClick={() => setExplorerLayout("icons")} title="Icon view">▦</button><button type="button" className={explorerLayout === "details" ? "active" : ""} onClick={() => setExplorerLayout("details")} title="Details view">☷</button></div>
     </section>
     <section className="explorer-address-row"><button type="button" className="explorer-up-button" onClick={() => selectView("all")} disabled={libraryView === "all"} title="Up to All PDFs">↑</button><div className="explorer-address"><button type="button" onClick={() => selectView("all")}>MathMargin</button><span>›</span><strong>{viewTitle}</strong></div><label className="explorer-search"><span>⌕</span><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={`Search ${viewTitle}`} aria-label={`Search ${viewTitle}`} /></label></section>
@@ -374,8 +430,8 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
         </nav>
         {!!folders.length && <><div className="folder-list-heading">Folders</div><nav className="explorer-folder-tree">{folders.map((folder) => <button type="button" key={folder.id} className={`${libraryView === `folder:${folder.id}` ? "active" : ""} ${folderDropTargetId === folder.id ? "drop-target" : ""}`} onClick={() => selectView(`folder:${folder.id}`)} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setFolderDropTargetId(folder.id); }} onDragLeave={() => setFolderDropTargetId("")} onDrop={(event) => void dropDocumentIntoFolder(event, folder.id)}><span className="tree-folder-glyph" /><strong>{folder.name}</strong><small>{documents.filter((document) => document.folderId === folder.id).length}</small></button>)}</nav></>}
       </aside>
-      <section className="books-section"><div className="section-heading explorer-pane-heading"><div><h2>{viewTitle}</h2>{selectedFolder && <div className="opened-folder-actions"><button type="button" onClick={() => void renameFolder(selectedFolder)}>Rename folder</button><button type="button" className="danger-action" onClick={() => void discardFolder(selectedFolder)}>Delete folder</button></div>}</div><span className="book-count">{visibleDocuments.length} {visibleDocuments.length === 1 ? "item" : "items"}</span></div>
-      {libraryView === "all" && !loading && <section className="file-manager-folders" aria-labelledby="folders-heading"><div className="file-manager-heading"><h3 id="folders-heading">Folders</h3><span>{visibleFolders.length} shown</span></div><div className="folder-icon-grid"><button type="button" className="library-folder-tile create-folder-tile" onClick={openFolderCreator}><span className="new-folder-icon" aria-hidden="true">+</span><strong>New folder</strong><small>Create a folder</small></button>{visibleFolders.map((folder) => { const count = documents.filter((document) => document.folderId === folder.id).length; return <button type="button" className={`library-folder-tile ${folderDropTargetId === folder.id ? "drop-target" : ""}`} key={folder.id} onClick={() => selectView(`folder:${folder.id}`)} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setFolderDropTargetId(folder.id); }} onDragLeave={() => setFolderDropTargetId("")} onDrop={(event) => void dropDocumentIntoFolder(event, folder.id)} aria-label={`Open ${folder.name}, ${count} ${count === 1 ? "PDF" : "PDFs"}`}><span className="windows-folder-icon" aria-hidden="true"><i /></span><strong>{folder.name}</strong><small>{count} {count === 1 ? "PDF" : "PDFs"}</small></button>; })}</div></section>}
+      <section className="books-section"><div className="section-heading explorer-pane-heading"><div><h2>{viewTitle}</h2>{selectedFolder && <p className="folder-management-hint">Use the toolbar above to rename or delete this folder.</p>}</div><span className="book-count">{visibleDocuments.length} {visibleDocuments.length === 1 ? "item" : "items"}</span></div>
+      {libraryView === "all" && !loading && <section className="file-manager-folders" aria-labelledby="folders-heading"><div className="file-manager-heading"><h3 id="folders-heading">Folders</h3><span>{visibleFolders.length} shown</span></div><div className="folder-icon-grid"><button type="button" className="library-folder-tile create-folder-tile" onClick={openFolderCreator}><span className="new-folder-icon" aria-hidden="true">+</span><strong>New folder</strong><small>Create a folder</small></button>{visibleFolders.map((folder) => { const count = documents.filter((document) => document.folderId === folder.id).length; return <div className={`library-folder-item ${folderMenuId === folder.id ? "menu-open" : ""}`} key={folder.id}><button type="button" className={`library-folder-tile ${folderDropTargetId === folder.id ? "drop-target" : ""}`} onClick={() => selectView(`folder:${folder.id}`)} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setFolderDropTargetId(folder.id); }} onDragLeave={() => setFolderDropTargetId("")} onDrop={(event) => void dropDocumentIntoFolder(event, folder.id)} aria-label={`Open ${folder.name}, ${count} ${count === 1 ? "PDF" : "PDFs"}`}><span className="windows-folder-icon" aria-hidden="true"><i /></span><strong>{folder.name}</strong><small>{count} {count === 1 ? "PDF" : "PDFs"}</small></button><button type="button" className="folder-more-button" onClick={() => setFolderMenuId((current) => current === folder.id ? "" : folder.id)} aria-label={`Options for ${folder.name}`} title="Folder options">•••</button>{folderMenuId === folder.id && <div className="folder-context-menu"><button type="button" onClick={() => openFolderRenamer(folder)}>Rename folder</button><button type="button" className="danger-action" onClick={() => { setFolderMenuId(""); setFolderPendingDelete(folder); }}>Delete folder</button></div>}</div>; })}</div></section>}
       {loading ? <div className="loading-row"><span className="spinner" /> Opening your library…</div> : !documents.length ? <div className="empty-library"><div className="empty-glyph">∫</div><div><h3>This folder is empty</h3><p>Add a PDF or drag one here from your computer.</p></div><button className="text-button" onClick={() => inputRef.current?.click()}>Add PDF</button></div> : !visibleDocuments.length ? <div className="empty-library filtered-empty"><div className="empty-glyph">∅</div><div><h3>{query ? "No matching PDFs" : "This folder is empty"}</h3><p>{query ? "Try another search." : "Drag a PDF onto this folder or add one from your computer."}</p></div>{!query && <button className="text-button" onClick={() => inputRef.current?.click()}>Add PDF</button>}</div> :
         <div className={`book-grid explorer-${explorerLayout}`}>{visibleDocuments.map((document, index) => <article className={`book-card ${selectedDocumentId === document.id ? "is-selected" : ""} ${draggedId === document.id ? "is-dragging" : ""} ${dropTargetId === document.id ? "is-drop-target" : ""}`} key={document.id} draggable={editingId !== document.id} onClick={() => setSelectedDocumentId(document.id)} onDoubleClick={() => onOpen(document)} onDragStart={(event) => startDocumentDrag(event, document)} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropTargetId(document.id); }} onDragLeave={() => setDropTargetId((current) => current === document.id ? "" : current)} onDrop={(event) => { event.preventDefault(); moveBook(event.dataTransfer.getData("application/x-mathmargin-document-id") || event.dataTransfer.getData("text/plain") || draggedId, document.id); setDraggedId(""); setDropTargetId(""); }} onDragEnd={() => { setDraggedId(""); setDropTargetId(""); setFolderDropTargetId(""); }}>
           <BookCover document={document} onSelect={() => setSelectedDocumentId(document.id)} onOpen={() => onOpen(document)} />
@@ -385,6 +441,9 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
       </section>
     </section>
     {creatingFolder && <div className="library-modal-backdrop"><section className="library-modal folder-create-dialog" role="dialog" aria-modal="true" aria-labelledby="folder-dialog-title"><button type="button" className="modal-close-button" onClick={() => setCreatingFolder(false)} aria-label="Cancel folder creation">×</button><span className="windows-folder-icon modal-folder-icon" aria-hidden="true"><i /></span><p className="eyebrow">Organize your library</p><h2 id="folder-dialog-title">Create a new folder</h2><p className="folder-dialog-copy">Give this folder a name. You can move textbooks and problem sets into it at any time.</p><form className="folder-create-form" onSubmit={(event) => { event.preventDefault(); void createFolder(); }}><label htmlFor="new-folder-name">Folder name</label><input id="new-folder-name" className="folder-name-input" value={folderName} onChange={(event) => setFolderName(event.target.value)} placeholder="For example: Algebra II" autoFocus maxLength={80} />{folderError && <div className="folder-dialog-error" role="alert">{folderError}</div>}<div className="modal-actions"><button type="button" onClick={() => setCreatingFolder(false)}>Cancel</button><button type="submit" className="confirm-folder-button" disabled={!folderName.trim()}>Create folder</button></div></form></section></div>}
+    {folderBeingRenamed && <div className="library-modal-backdrop"><section className="library-modal folder-rename-dialog" role="dialog" aria-modal="true" aria-labelledby="rename-folder-dialog-title"><button type="button" className="modal-close-button" onClick={() => setFolderBeingRenamed(null)} aria-label="Cancel folder rename">×</button><span className="windows-folder-icon modal-folder-icon" aria-hidden="true"><i /></span><p className="eyebrow">Folder options</p><h2 id="rename-folder-dialog-title">Rename folder</h2><form className="folder-create-form" onSubmit={(event) => { event.preventDefault(); void renameFolder(); }}><label htmlFor="rename-folder-name">Folder name</label><input id="rename-folder-name" className="folder-rename-input" value={folderName} onChange={(event) => setFolderName(event.target.value)} autoFocus maxLength={80} />{folderError && <div className="folder-dialog-error" role="alert">{folderError}</div>}<div className="modal-actions"><button type="button" onClick={() => setFolderBeingRenamed(null)}>Cancel</button><button type="submit" className="confirm-folder-button" disabled={!folderName.trim()}>Save name</button></div></form></section></div>}
+    {folderPendingDelete && <div className="library-modal-backdrop"><section className="library-modal folder-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-folder-dialog-title"><button type="button" className="modal-close-button" onClick={() => setFolderPendingDelete(null)} aria-label="Cancel folder deletion">×</button><div className="delete-folder-glyph" aria-hidden="true">!</div><p className="eyebrow">Folder options</p><h2 id="delete-folder-dialog-title">Delete “{folderPendingDelete.name}”?</h2><p className="folder-dialog-copy">The folder will be removed. Its {documents.filter((document) => document.folderId === folderPendingDelete.id).length} PDFs and all their annotations will be kept and moved to Unfiled.</p><div className="modal-actions"><button type="button" onClick={() => setFolderPendingDelete(null)}>Cancel</button><button type="button" className="confirm-delete-folder-button" onClick={() => void discardFolder(folderPendingDelete)}>Delete folder</button></div></section></div>}
+    {pendingFolderImport && <div className="library-modal-backdrop"><section className="library-modal folder-import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-folder-dialog-title"><button type="button" className="modal-close-button" onClick={() => { if (!folderImporting) setPendingFolderImport(null); }} disabled={folderImporting} aria-label="Cancel folder import">×</button><span className="windows-folder-icon modal-folder-icon" aria-hidden="true"><i /></span><p className="eyebrow">Import from Windows</p><h2 id="import-folder-dialog-title">Import “{pendingFolderImport.name}”</h2><p className="folder-dialog-copy">MathMargin found {pendingImportPdfs.length} {pendingImportPdfs.length === 1 ? "PDF" : "PDFs"}, including PDFs in subfolders. They will be placed together in a new MathMargin folder.</p><div className="folder-import-summary"><span><strong>{pendingImportEligible.length}</strong> ready to import</span>{pendingImportPdfs.length !== pendingImportEligible.length && <span className="warning"><strong>{pendingImportPdfs.length - pendingImportEligible.length}</strong> over 120 MB</span>}</div><div className="folder-import-type"><span>Import these PDFs as</span><div className="document-type-grid" role="radiogroup" aria-label="Imported PDF type"><button type="button" role="radio" aria-checked={folderImportType === "textbook"} className={`document-type-option ${folderImportType === "textbook" ? "selected" : ""}`} onClick={() => setFolderImportType("textbook")} disabled={folderImporting}><span className="document-type-icon">T</span><strong>Textbooks</strong><small>Books and reading material</small></button><button type="button" role="radio" aria-checked={folderImportType === "problem-set"} className={`document-type-option ${folderImportType === "problem-set" ? "selected" : ""}`} onClick={() => setFolderImportType("problem-set")} disabled={folderImporting}><span className="document-type-icon">P</span><strong>Problem sets</strong><small>Assignments and exercises</small></button></div></div>{folderImporting && <div className="folder-import-progress"><span style={{ width: `${Math.round(folderImportProgress / Math.max(1, pendingImportEligible.length) * 100)}%` }} /><small>Importing PDF {Math.min(folderImportProgress, pendingImportEligible.length)} of {pendingImportEligible.length}…</small></div>}<div className="modal-actions"><button type="button" onClick={() => setPendingFolderImport(null)} disabled={folderImporting}>Cancel</button><button type="button" className="confirm-folder-import-button" onClick={() => void importFolder()} disabled={folderImporting || !pendingImportEligible.length}>{folderImporting ? "Importing…" : `Import ${pendingImportEligible.length} PDFs`}</button></div></section></div>}
     {pendingUpload && <div className="library-modal-backdrop"><section className="library-modal upload-type-dialog" role="dialog" aria-modal="true" aria-labelledby="upload-dialog-title"><button type="button" className="modal-close-button" onClick={cancelUpload} disabled={uploading} aria-label="Cancel upload">×</button><p className="eyebrow">Add to your library</p><h2 id="upload-dialog-title">What kind of PDF is this?</h2><p className="upload-file-name" title={pendingUpload.name}>{pendingUpload.name}</p><div className="document-type-grid" role="radiogroup" aria-label="PDF type"><button type="button" role="radio" aria-checked={pendingDocumentType === "textbook"} className={`document-type-option ${pendingDocumentType === "textbook" ? "selected" : ""}`} onClick={() => setPendingDocumentType("textbook")}><span className="document-type-icon">T</span><strong>Textbook</strong><small>Chapters, sections, and reading notes</small></button><button type="button" role="radio" aria-checked={pendingDocumentType === "problem-set"} className={`document-type-option ${pendingDocumentType === "problem-set" ? "selected" : ""}`} onClick={() => setPendingDocumentType("problem-set")}><span className="document-type-icon">P</span><strong>Problem set</strong><small>Exercises, assignments, and solutions</small></button></div><label className="upload-folder-field"><span>Put it in a folder</span><select value={pendingFolderId} onChange={(event) => setPendingFolderId(event.target.value)}><option value="">Unfiled</option>{folders.map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select></label><div className="modal-actions"><button type="button" onClick={cancelUpload} disabled={uploading}>Cancel</button><button type="button" className="confirm-upload-button" onClick={() => void upload()} disabled={uploading}>{uploading ? "Adding PDF…" : "Add to library"}</button></div></section></div>}
   </main>;
 }

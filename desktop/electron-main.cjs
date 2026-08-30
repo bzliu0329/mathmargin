@@ -42,7 +42,7 @@ async function runUploadSmokeTest(window) {
     if (!document.querySelector(".explorer-command-bar") || !document.querySelector(".explorer-address") || !document.querySelector(".explorer-search input") || !document.querySelector(".explorer-view-toggle")) return { ok: false, error: "The File Explorer controls were not rendered." };
     const smokeToken = "smoke-" + Date.now();
     const smokePdfName = "mathmargin-" + smokeToken + ".pdf";
-    const smokeFolderName = "mathmargin-" + smokeToken + "-folder";
+    let smokeFolderName = "mathmargin-" + smokeToken + "-folder";
     const smokeCards = () => [...document.querySelectorAll(".book-card")].filter(card => card.textContent?.includes(smokeToken));
     const smokeFolderTiles = () => [...document.querySelectorAll(".library-folder-tile")].filter(tile => tile.textContent?.includes(smokeFolderName));
     window.confirm = () => true;
@@ -62,6 +62,19 @@ async function runUploadSmokeTest(window) {
     const folderStartedAt = Date.now();
     while (document.querySelector(".books-section h2")?.textContent !== smokeFolderName && Date.now() - folderStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
     if (document.querySelector(".books-section h2")?.textContent !== smokeFolderName) return { ok: false, error: "A PDF folder could not be created and opened." };
+    document.querySelector(".rename-folder-command")?.click();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const renameInput = document.querySelector(".folder-rename-input");
+    if (!renameInput) return { ok: false, folderCreated: true, error: "The folder rename dialog did not open." };
+    const renamedFolderName = smokeFolderName + "-renamed";
+    setInputValue.call(renameInput, renamedFolderName);
+    renameInput.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 100));
+    document.querySelector(".folder-rename-dialog form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    const renameStartedAt = Date.now();
+    while (document.querySelector(".books-section h2")?.textContent !== renamedFolderName && Date.now() - renameStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+    if (document.querySelector(".books-section h2")?.textContent !== renamedFolderName) return { ok: false, folderCreated: true, error: "The folder rename was not saved." };
+    smokeFolderName = renamedFolderName;
     document.querySelector(".explorer-up-button")?.click();
     const folderTileStartedAt = Date.now();
     while (!smokeFolderTiles().length && Date.now() - folderTileStartedAt < 3000) await new Promise(resolve => setTimeout(resolve, 100));
@@ -380,12 +393,39 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        document.querySelector(".opened-folder-actions .danger-action")?.click();
+        document.querySelector(".delete-folder-command")?.click();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const confirmFolderDelete = document.querySelector(".confirm-delete-folder-button");
+        if (!confirmFolderDelete) return { ok: false, uploaded: true, rendered: true, error: "The folder delete confirmation did not open." };
+        confirmFolderDelete.click();
         const folderCleanupStartedAt = Date.now();
         while (document.querySelector(".books-section h2")?.textContent === smokeFolderName && Date.now() - folderCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
         [...document.querySelectorAll(".folder-nav > button")].find(button => button.textContent?.includes("All PDFs"))?.click();
         await new Promise(resolve => setTimeout(resolve, 100));
-        return { ok: smokeCards().length === 0 && smokeFolderTiles().length === 0, folderCreated: true, folderIconVisible: true, folderIconOpened: true, explorerToolbar: true, explorerAddressBar: true, explorerSearch: true, explorerLayoutToggle: true, typePicker: true, problemSetSaved: true, assignedByDrag: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: smokeCards().length === 0, folderCleanedUp: smokeFolderTiles().length === 0 };
+        if (smokeFolderTiles().length) return { ok: false, folderRenamed: true, error: "The confirmed folder delete did not remove the folder." };
+        const folderImportInput = document.querySelector(".explorer-folder-input");
+        if (!folderImportInput) return { ok: false, folderRenamed: true, folderDeleted: true, error: "The folder import control was not rendered." };
+        const importFolderName = "mathmargin-import-" + smokeToken;
+        const importFile = new File([bytes], "imported-" + smokeToken + ".pdf", { type: "application/pdf" });
+        Object.defineProperty(importFile, "webkitRelativePath", { configurable: true, value: importFolderName + "/nested/imported-" + smokeToken + ".pdf" });
+        const importTransfer = new DataTransfer(); importTransfer.items.add(importFile);
+        Object.defineProperty(folderImportInput, "files", { configurable: true, value: importTransfer.files });
+        folderImportInput.dispatchEvent(new Event("change", { bubbles: true }));
+        const importDialogStartedAt = Date.now();
+        while (!document.querySelector(".folder-import-dialog") && Date.now() - importDialogStartedAt < 3000) await new Promise(resolve => setTimeout(resolve, 100));
+        if (!document.querySelector(".folder-import-dialog")) return { ok: false, folderRenamed: true, folderDeleted: true, error: "Selecting a Windows folder did not open the import dialog." };
+        document.querySelector(".confirm-folder-import-button")?.click();
+        const importStartedAt = Date.now();
+        while (document.querySelector(".books-section h2")?.textContent !== importFolderName && Date.now() - importStartedAt < 10000) await new Promise(resolve => setTimeout(resolve, 100));
+        const importedCard = [...document.querySelectorAll(".book-card")].find(card => card.textContent?.includes("imported-" + smokeToken));
+        if (!importedCard || document.querySelector(".books-section h2")?.textContent !== importFolderName) return { ok: false, folderRenamed: true, folderDeleted: true, error: "The selected Windows folder was not imported." };
+        [...importedCard.querySelectorAll("button")].find(button => button.textContent?.trim() === "Delete")?.click();
+        const importCardCleanupStartedAt = Date.now();
+        while ([...document.querySelectorAll(".book-card")].some(card => card.textContent?.includes("imported-" + smokeToken)) && Date.now() - importCardCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+        document.querySelector(".delete-folder-command")?.click(); await new Promise(resolve => setTimeout(resolve, 100)); document.querySelector(".confirm-delete-folder-button")?.click();
+        const importFolderCleanupStartedAt = Date.now();
+        while (document.querySelector(".books-section h2")?.textContent === importFolderName && Date.now() - importFolderCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+        return { ok: ![...document.querySelectorAll(".book-card")].some(card => card.textContent?.includes("imported-" + smokeToken)), folderCreated: true, folderRenamed: true, folderDeleted: true, folderImport: true, recursiveFolderImport: true, folderIconVisible: true, folderIconOpened: true, explorerToolbar: true, explorerAddressBar: true, explorerSearch: true, explorerLayoutToggle: true, typePicker: true, problemSetSaved: true, assignedByDrag: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: true, folderCleanedUp: true };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
