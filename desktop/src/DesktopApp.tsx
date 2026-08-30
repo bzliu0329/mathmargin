@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import type { EditorView } from "@codemirror/view";
 import { Document, Page, pdfjs } from "react-pdf";
 import katex from "katex";
@@ -21,6 +21,7 @@ const KATEX_MACROS = {
 
 const NOTES_WIDTH_KEY = "mathmargin:notes-width";
 const OPEN_BOOKS_KEY = "mathmargin:open-books";
+const EXPLORER_LAYOUT_KEY = "mathmargin:explorer-layout";
 const AREA_RESIZE_HANDLES = ["nw", "ne", "sw", "se"] as const;
 type AreaResizeHandle = typeof AREA_RESIZE_HANDLES[number];
 
@@ -175,10 +176,10 @@ export function DesktopApp() {
   </div>;
 }
 
-function BookCover({ document, onOpen }: { document: LocalDocument; onOpen: () => void }) {
+function BookCover({ document, onSelect, onOpen }: { document: LocalDocument; onSelect: () => void; onOpen: () => void }) {
   const fileUrl = useMemo(() => URL.createObjectURL(document.file instanceof Blob ? document.file : new Blob([document.file], { type: "application/pdf" })), [document.file]);
   useEffect(() => () => URL.revokeObjectURL(fileUrl), [fileUrl]);
-  return <button className="book-cover pdf-book-cover" onClick={onOpen} aria-label={`Open ${document.title}`}>
+  return <button className="book-cover pdf-book-cover" onClick={onSelect} onDoubleClick={onOpen} aria-label={`Select ${document.title}`} title="Double-click to open">
     <Document file={fileUrl} loading={<span className="cover-loading"><span className="spinner" /> Loading cover…</span>} error={<span className="cover-loading">Cover unavailable</span>}><Page pageNumber={1} height={190} renderAnnotationLayer={false} renderTextLayer={false} /></Document>
     <span className="cover-pages">{document.pageCount} pages</span>
   </button>;
@@ -198,6 +199,10 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [folderError, setFolderError] = useState("");
+  const [selectedDocumentId, setSelectedDocumentId] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [explorerLayout, setExplorerLayout] = useState<"icons" | "details">(() => localStorage.getItem(EXPLORER_LAYOUT_KEY) === "details" ? "details" : "icons");
+  const [folderDropTargetId, setFolderDropTargetId] = useState("");
   const [editingId, setEditingId] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draggedId, setDraggedId] = useState("");
@@ -209,14 +214,15 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
       setDocuments(savedDocuments); setFolders(savedFolders);
     }).catch((cause) => setError(message(cause, "Your library could not be opened."))).finally(() => setLoading(false));
   }, []);
+  useEffect(() => { localStorage.setItem(EXPLORER_LAYOUT_KEY, explorerLayout); }, [explorerLayout]);
 
-  function chooseUpload(file?: File) {
+  function chooseUpload(file?: File, destinationFolderId?: string) {
     if (!file || uploading) return;
     setError("");
     if (file.size > MAX_PDF_SIZE) return setError("This PDF is larger than the 120 MB limit.");
     if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) return setError("Choose a PDF file to continue.");
     setPendingUpload(file); setPendingDocumentType("textbook");
-    setPendingFolderId(libraryView.startsWith("folder:") ? libraryView.slice(7) : "");
+    setPendingFolderId(destinationFolderId !== undefined ? destinationFolderId : libraryView.startsWith("folder:") ? libraryView.slice(7) : "");
   }
 
   async function upload() {
@@ -287,6 +293,15 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
     catch (cause) { setError(message(cause, "The PDF could not be moved.")); }
   }
 
+  async function dropDocumentIntoFolder(event: DragEvent, folderId: string) {
+    event.preventDefault(); event.stopPropagation(); setFolderDropTargetId("");
+    if (event.dataTransfer.files.length) { setDragging(false); chooseUpload(event.dataTransfer.files[0], folderId); return; }
+    const id = event.dataTransfer.getData("application/x-mathmargin-document-id") || event.dataTransfer.getData("text/plain") || draggedId;
+    const document = documents.find((item) => item.id === id);
+    if (!document || (document.folderId ?? "") === folderId) return;
+    await moveDocument(document, folderId);
+  }
+
   async function rename(document: LocalDocument) {
     const title = draftTitle.trim(); if (!title) return;
     const updated = { ...document, title: title.slice(0, 160), updatedAt: new Date().toISOString() };
@@ -313,15 +328,23 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
     const [moved] = next.splice(from, 1); next.splice(to, 0, moved);
     void commitOrder(next);
   }
+  const query = searchQuery.trim().toLowerCase();
   const visibleDocuments = documents.filter((document) => {
     if (libraryView === "textbooks") return documentTypeOf(document) === "textbook";
     if (libraryView === "problem-sets") return documentTypeOf(document) === "problem-set";
     if (libraryView === "unfiled") return !document.folderId;
     if (libraryView.startsWith("folder:")) return document.folderId === libraryView.slice(7);
     return true;
-  });
+  }).filter((document) => !query || `${document.title} ${document.originalFilename} ${documentTypeLabel(documentTypeOf(document))}`.toLowerCase().includes(query));
   const selectedFolder = libraryView.startsWith("folder:") ? folders.find((folder) => folder.id === libraryView.slice(7)) : undefined;
   const viewTitle = selectedFolder?.name ?? (libraryView === "textbooks" ? "Textbooks" : libraryView === "problem-sets" ? "Problem sets" : libraryView === "unfiled" ? "Unfiled PDFs" : "All PDFs");
+  const selectedDocument = documents.find((document) => document.id === selectedDocumentId);
+  const visibleFolders = folders.filter((folder) => !query || folder.name.toLowerCase().includes(query));
+  function selectView(view: string) { setLibraryView(view); setSelectedDocumentId(""); setSearchQuery(""); }
+  function startDocumentDrag(event: DragEvent, document: LocalDocument) {
+    setDraggedId(document.id); setSelectedDocumentId(document.id); event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/x-mathmargin-document-id", document.id); event.dataTransfer.setData("text/plain", document.id);
+  }
   function moveVisibleBookBy(id: string, delta: number) {
     const index = visibleDocuments.findIndex((document) => document.id === id);
     const target = visibleDocuments[index + delta]; if (target) moveBook(id, target.id);
@@ -329,28 +352,36 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
 
   return <main className="library-shell desktop-library">
     <header className="library-header desktop-drag-region"><div className="brand"><span className="brand-mark">M</span><span>MathMargin</span></div><span className="desktop-local-pill">Stored locally · works offline</span></header>
-    <section className="library-hero"><div><p className="eyebrow">Your mathematical reading room</p><h1>Read closely.<br />Think in the margins.</h1><p className="hero-copy">Organize textbooks and problem sets, mark the ideas that matter, and keep beautifully rendered LaTeX notes beside every page.</p></div><div>
-      <label className={`upload-card ${dragging ? "is-dragging" : ""} ${uploading ? "is-uploading" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); chooseUpload(event.dataTransfer.files[0]); }}>
-        <input ref={inputRef} type="file" accept="application/pdf,.pdf" onChange={(event) => chooseUpload(event.target.files?.[0])} />
-        <span className="upload-icon">{uploading ? "…" : "↑"}</span><strong>{uploading ? "Reading and saving your PDF…" : "Add a PDF"}</strong><span>{uploading ? "This can take a moment for a large file" : "Textbooks, problem sets, and more"}</span><small>PDF · up to 120 MB</small>
-      </label>{error && <div className="library-error" role="alert"><span>!</span>{error}<button onClick={() => setError("")}>×</button></div>}
-    </div></section>
-    <section className="library-workspace">
+    <input ref={inputRef} className="explorer-file-input" type="file" accept="application/pdf,.pdf" onChange={(event) => chooseUpload(event.target.files?.[0])} />
+    <section className="explorer-command-bar" aria-label="Library commands">
+      <button type="button" className="primary-command" onClick={() => inputRef.current?.click()} disabled={uploading}><span>＋</span>{uploading ? "Adding PDF…" : "Add PDF"}</button>
+      <button type="button" onClick={openFolderCreator}><span className="command-folder-glyph" />New folder</button><span className="command-divider" />
+      <button type="button" disabled={!selectedDocument} onClick={() => { if (selectedDocument) { setEditingId(selectedDocument.id); setDraftTitle(selectedDocument.title); } }}>Rename</button>
+      <button type="button" disabled={!selectedDocument} onClick={() => { if (selectedDocument) void discard(selectedDocument); }}>Delete</button>
+      <button type="button" disabled={!selectedDocument} onClick={() => { if (selectedDocument) onOpen(selectedDocument); }}>Open</button>
+      <span className="command-spacer" /><div className="explorer-view-toggle" aria-label="Layout"><button type="button" className={explorerLayout === "icons" ? "active" : ""} onClick={() => setExplorerLayout("icons")} title="Icon view">▦</button><button type="button" className={explorerLayout === "details" ? "active" : ""} onClick={() => setExplorerLayout("details")} title="Details view">☷</button></div>
+    </section>
+    <section className="explorer-address-row"><button type="button" className="explorer-up-button" onClick={() => selectView("all")} disabled={libraryView === "all"} title="Up to All PDFs">↑</button><div className="explorer-address"><button type="button" onClick={() => selectView("all")}>MathMargin</button><span>›</span><strong>{viewTitle}</strong></div><label className="explorer-search"><span>⌕</span><input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={`Search ${viewTitle}`} aria-label={`Search ${viewTitle}`} /></label></section>
+    {error && <div className="library-error explorer-error" role="alert"><span>!</span>{error}<button onClick={() => setError("")}>×</button></div>}
+    <section className={`library-workspace ${dragging ? "is-file-dragging" : ""}`} onDragEnter={(event) => { if (event.dataTransfer.types.includes("Files")) { event.preventDefault(); setDragging(true); } }} onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }} onDrop={(event) => { if (event.dataTransfer.files.length) { event.preventDefault(); setDragging(false); chooseUpload(event.dataTransfer.files[0]); } }}>
+      {dragging && <div className="explorer-file-drop-overlay"><strong>Drop PDF to add it</strong><span>You’ll choose its type and folder next</span></div>}
       <aside className="library-folders" aria-label="PDF library filters"><div className="folder-heading"><span>Library</span></div>
         <nav className="folder-nav">
-          <button className={libraryView === "all" ? "active" : ""} onClick={() => setLibraryView("all")}><span>All PDFs</span><small>{documents.length}</small></button>
-          <button className={libraryView === "textbooks" ? "active" : ""} onClick={() => setLibraryView("textbooks")}><span>Textbooks</span><small>{documents.filter((document) => documentTypeOf(document) === "textbook").length}</small></button>
-          <button className={libraryView === "problem-sets" ? "active" : ""} onClick={() => setLibraryView("problem-sets")}><span>Problem sets</span><small>{documents.filter((document) => documentTypeOf(document) === "problem-set").length}</small></button>
-          <button className={libraryView === "unfiled" ? "active" : ""} onClick={() => setLibraryView("unfiled")}><span>Unfiled</span><small>{documents.filter((document) => !document.folderId).length}</small></button>
+          <button className={libraryView === "all" ? "active" : ""} onClick={() => selectView("all")}><span>▣ All PDFs</span><small>{documents.length}</small></button>
+          <button className={libraryView === "textbooks" ? "active" : ""} onClick={() => selectView("textbooks")}><span>▤ Textbooks</span><small>{documents.filter((document) => documentTypeOf(document) === "textbook").length}</small></button>
+          <button className={libraryView === "problem-sets" ? "active" : ""} onClick={() => selectView("problem-sets")}><span>☑ Problem sets</span><small>{documents.filter((document) => documentTypeOf(document) === "problem-set").length}</small></button>
+          <button className={`${libraryView === "unfiled" ? "active" : ""} ${folderDropTargetId === "unfiled" ? "drop-target" : ""}`} onClick={() => selectView("unfiled")} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setFolderDropTargetId("unfiled"); }} onDragLeave={() => setFolderDropTargetId("")} onDrop={(event) => void dropDocumentIntoFolder(event, "")}><span>⌂ Unfiled</span><small>{documents.filter((document) => !document.folderId).length}</small></button>
         </nav>
+        {!!folders.length && <><div className="folder-list-heading">Folders</div><nav className="explorer-folder-tree">{folders.map((folder) => <button type="button" key={folder.id} className={`${libraryView === `folder:${folder.id}` ? "active" : ""} ${folderDropTargetId === folder.id ? "drop-target" : ""}`} onClick={() => selectView(`folder:${folder.id}`)} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setFolderDropTargetId(folder.id); }} onDragLeave={() => setFolderDropTargetId("")} onDrop={(event) => void dropDocumentIntoFolder(event, folder.id)}><span className="tree-folder-glyph" /><strong>{folder.name}</strong><small>{documents.filter((document) => document.folderId === folder.id).length}</small></button>)}</nav></>}
       </aside>
-      <section className="books-section"><div className="section-heading"><div>{selectedFolder ? <button type="button" className="folder-breadcrumb" onClick={() => setLibraryView("all")}>← All PDFs</button> : <p className="eyebrow">Local library</p>}<h2>{viewTitle}</h2>{selectedFolder && <div className="opened-folder-actions"><button type="button" onClick={() => void renameFolder(selectedFolder)}>Rename folder</button><button type="button" className="danger-action" onClick={() => void discardFolder(selectedFolder)}>Delete folder</button></div>}</div><span className="book-count">{visibleDocuments.length} {visibleDocuments.length === 1 ? "PDF" : "PDFs"}</span></div>
-      {libraryView === "all" && !loading && <section className="file-manager-folders" aria-labelledby="folders-heading"><div className="file-manager-heading"><h3 id="folders-heading">Folders</h3><span>{folders.length} {folders.length === 1 ? "folder" : "folders"}</span></div><div className="folder-icon-grid"><button type="button" className="library-folder-tile create-folder-tile" onClick={openFolderCreator}><span className="new-folder-icon" aria-hidden="true">+</span><strong>New folder</strong><small>Organize your PDFs</small></button>{folders.map((folder) => { const count = documents.filter((document) => document.folderId === folder.id).length; return <button type="button" className="library-folder-tile" key={folder.id} onClick={() => setLibraryView(`folder:${folder.id}`)} aria-label={`Open ${folder.name}, ${count} ${count === 1 ? "PDF" : "PDFs"}`}><span className="windows-folder-icon" aria-hidden="true"><i /></span><strong>{folder.name}</strong><small>{count} {count === 1 ? "PDF" : "PDFs"}</small></button>; })}</div></section>}
-      {loading ? <div className="loading-row"><span className="spinner" /> Opening your library…</div> : !documents.length ? <div className="empty-library"><div className="empty-glyph">∫</div><div><h3>Your library is ready</h3><p>Add your first textbook or problem set to begin making mathematical notes.</p></div><button className="text-button" onClick={() => inputRef.current?.click()}>Choose PDF</button></div> : !visibleDocuments.length ? <div className="empty-library filtered-empty"><div className="empty-glyph">∅</div><div><h3>Nothing here yet</h3><p>Add a PDF here or move one from another library view.</p></div><button className="text-button" onClick={() => inputRef.current?.click()}>Add PDF</button></div> :
-        <div className="book-grid">{visibleDocuments.map((document, index) => <article className={`book-card ${draggedId === document.id ? "is-dragging" : ""} ${dropTargetId === document.id ? "is-drop-target" : ""}`} key={document.id} draggable={editingId !== document.id} onDragStart={(event) => { setDraggedId(document.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", document.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropTargetId(document.id); }} onDragLeave={() => setDropTargetId((current) => current === document.id ? "" : current)} onDrop={(event) => { event.preventDefault(); moveBook(event.dataTransfer.getData("text/plain") || draggedId, document.id); setDraggedId(""); setDropTargetId(""); }} onDragEnd={() => { setDraggedId(""); setDropTargetId(""); }}>
-          <BookCover document={document} onOpen={() => onOpen(document)} />
-          <div className="book-info"><div className={`document-type-badge ${documentTypeOf(document)}`}>{documentTypeLabel(documentTypeOf(document))}</div>{editingId === document.id ? <form className="rename-form" onSubmit={(event) => { event.preventDefault(); rename(document); }}><input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} autoFocus /><button>Save</button><button type="button" onClick={() => setEditingId("")}>Cancel</button></form> : <button className="desktop-book-title" onClick={() => onOpen(document)}><h3>{document.title}</h3></button>}<p>{formatSize(document.fileSize)} · {document.pageCount} pages</p><label className="book-folder-field"><span>Folder</span><select value={document.folderId ?? ""} onChange={(event) => void moveDocument(document, event.target.value)}><option value="">Unfiled</option>{folders.map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select></label><div className="book-position-actions" aria-label={`Move ${document.title}`}><span>Drag to reorder</span><button type="button" onClick={() => moveVisibleBookBy(document.id, -1)} disabled={index === 0} aria-label={`Move ${document.title} earlier`}>←</button><button type="button" onClick={() => moveVisibleBookBy(document.id, 1)} disabled={index === visibleDocuments.length - 1} aria-label={`Move ${document.title} later`}>→</button></div><div className="book-actions"><button className="open-button" onClick={() => onOpen(document)}>Open PDF <span>→</span></button><button onClick={() => { setEditingId(document.id); setDraftTitle(document.title); }}>Rename</button><button className="danger-action" onClick={() => discard(document)}>Delete</button></div></div>
+      <section className="books-section"><div className="section-heading explorer-pane-heading"><div><h2>{viewTitle}</h2>{selectedFolder && <div className="opened-folder-actions"><button type="button" onClick={() => void renameFolder(selectedFolder)}>Rename folder</button><button type="button" className="danger-action" onClick={() => void discardFolder(selectedFolder)}>Delete folder</button></div>}</div><span className="book-count">{visibleDocuments.length} {visibleDocuments.length === 1 ? "item" : "items"}</span></div>
+      {libraryView === "all" && !loading && <section className="file-manager-folders" aria-labelledby="folders-heading"><div className="file-manager-heading"><h3 id="folders-heading">Folders</h3><span>{visibleFolders.length} shown</span></div><div className="folder-icon-grid"><button type="button" className="library-folder-tile create-folder-tile" onClick={openFolderCreator}><span className="new-folder-icon" aria-hidden="true">+</span><strong>New folder</strong><small>Create a folder</small></button>{visibleFolders.map((folder) => { const count = documents.filter((document) => document.folderId === folder.id).length; return <button type="button" className={`library-folder-tile ${folderDropTargetId === folder.id ? "drop-target" : ""}`} key={folder.id} onClick={() => selectView(`folder:${folder.id}`)} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setFolderDropTargetId(folder.id); }} onDragLeave={() => setFolderDropTargetId("")} onDrop={(event) => void dropDocumentIntoFolder(event, folder.id)} aria-label={`Open ${folder.name}, ${count} ${count === 1 ? "PDF" : "PDFs"}`}><span className="windows-folder-icon" aria-hidden="true"><i /></span><strong>{folder.name}</strong><small>{count} {count === 1 ? "PDF" : "PDFs"}</small></button>; })}</div></section>}
+      {loading ? <div className="loading-row"><span className="spinner" /> Opening your library…</div> : !documents.length ? <div className="empty-library"><div className="empty-glyph">∫</div><div><h3>This folder is empty</h3><p>Add a PDF or drag one here from your computer.</p></div><button className="text-button" onClick={() => inputRef.current?.click()}>Add PDF</button></div> : !visibleDocuments.length ? <div className="empty-library filtered-empty"><div className="empty-glyph">∅</div><div><h3>{query ? "No matching PDFs" : "This folder is empty"}</h3><p>{query ? "Try another search." : "Drag a PDF onto this folder or add one from your computer."}</p></div>{!query && <button className="text-button" onClick={() => inputRef.current?.click()}>Add PDF</button>}</div> :
+        <div className={`book-grid explorer-${explorerLayout}`}>{visibleDocuments.map((document, index) => <article className={`book-card ${selectedDocumentId === document.id ? "is-selected" : ""} ${draggedId === document.id ? "is-dragging" : ""} ${dropTargetId === document.id ? "is-drop-target" : ""}`} key={document.id} draggable={editingId !== document.id} onClick={() => setSelectedDocumentId(document.id)} onDoubleClick={() => onOpen(document)} onDragStart={(event) => startDocumentDrag(event, document)} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropTargetId(document.id); }} onDragLeave={() => setDropTargetId((current) => current === document.id ? "" : current)} onDrop={(event) => { event.preventDefault(); moveBook(event.dataTransfer.getData("application/x-mathmargin-document-id") || event.dataTransfer.getData("text/plain") || draggedId, document.id); setDraggedId(""); setDropTargetId(""); }} onDragEnd={() => { setDraggedId(""); setDropTargetId(""); setFolderDropTargetId(""); }}>
+          <BookCover document={document} onSelect={() => setSelectedDocumentId(document.id)} onOpen={() => onOpen(document)} />
+          <div className="book-info"><div className={`document-type-badge ${documentTypeOf(document)}`}>{documentTypeLabel(documentTypeOf(document))}</div>{editingId === document.id ? <form className="rename-form" onSubmit={(event) => { event.preventDefault(); void rename(document); }} onClick={(event) => event.stopPropagation()}><input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} autoFocus /><button>Save</button><button type="button" onClick={() => setEditingId("")}>Cancel</button></form> : <button className="desktop-book-title" onClick={() => setSelectedDocumentId(document.id)} onDoubleClick={() => onOpen(document)}><h3>{document.title}</h3></button>}<p>{formatSize(document.fileSize)} · {document.pageCount} pages</p><span className="explorer-location">{folders.find((folder) => folder.id === document.folderId)?.name ?? "Unfiled"}</span><div className="book-position-actions" aria-label={`Move ${document.title}`}><span>Drag to move</span><button type="button" onClick={() => moveVisibleBookBy(document.id, -1)} disabled={index === 0} aria-label={`Move ${document.title} earlier`}>←</button><button type="button" onClick={() => moveVisibleBookBy(document.id, 1)} disabled={index === visibleDocuments.length - 1} aria-label={`Move ${document.title} later`}>→</button></div><div className="book-actions"><button className="open-button" onClick={() => onOpen(document)}>Open <span>→</span></button><button onClick={() => { setEditingId(document.id); setDraftTitle(document.title); }}>Rename</button><button className="danger-action" onClick={() => void discard(document)}>Delete</button></div></div>
         </article>)}</div>}
+        <footer className="explorer-status-bar"><span>{visibleDocuments.length} {visibleDocuments.length === 1 ? "item" : "items"}</span>{selectedDocument && <span>1 item selected · {formatSize(selectedDocument.fileSize)}</span>}<span>Drag PDFs onto a folder to move them</span></footer>
       </section>
     </section>
     {creatingFolder && <div className="library-modal-backdrop"><section className="library-modal folder-create-dialog" role="dialog" aria-modal="true" aria-labelledby="folder-dialog-title"><button type="button" className="modal-close-button" onClick={() => setCreatingFolder(false)} aria-label="Cancel folder creation">×</button><span className="windows-folder-icon modal-folder-icon" aria-hidden="true"><i /></span><p className="eyebrow">Organize your library</p><h2 id="folder-dialog-title">Create a new folder</h2><p className="folder-dialog-copy">Give this folder a name. You can move textbooks and problem sets into it at any time.</p><form className="folder-create-form" onSubmit={(event) => { event.preventDefault(); void createFolder(); }}><label htmlFor="new-folder-name">Folder name</label><input id="new-folder-name" className="folder-name-input" value={folderName} onChange={(event) => setFolderName(event.target.value)} placeholder="For example: Algebra II" autoFocus maxLength={80} />{folderError && <div className="folder-dialog-error" role="alert">{folderError}</div>}<div className="modal-actions"><button type="button" onClick={() => setCreatingFolder(false)}>Cancel</button><button type="submit" className="confirm-folder-button" disabled={!folderName.trim()}>Create folder</button></div></form></section></div>}

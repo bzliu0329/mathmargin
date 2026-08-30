@@ -62,7 +62,11 @@ test("keeps desktop PDF folders and document types persistent", async () => {
   assert.match(desktop, /What kind of PDF is this\?/);
   assert.match(desktop, /Problem set/);
   assert.match(desktop, /Put it in a folder/);
-  assert.match(desktop, /className="library-folder-tile"/);
+  assert.match(desktop, /library-folder-tile/);
   assert.match(desktop, /Create a new folder/);
+  assert.match(desktop, /explorer-command-bar/);
+  assert.match(desktop, /explorer-address-row/);
+  assert.match(desktop, /application\/x-mathmargin-document-id/);
+  assert.match(desktop, /dropDocumentIntoFolder/);
   assert.match(desktop, /Its PDFs will be kept and moved to Unfiled/);
 });

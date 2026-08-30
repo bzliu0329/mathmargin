@@ -39,6 +39,7 @@ async function runUploadSmokeTest(window) {
     const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
     const input = document.querySelector('input[type="file"]');
     if (!input) return { ok: false, error: "The upload input was not rendered." };
+    if (!document.querySelector(".explorer-command-bar") || !document.querySelector(".explorer-address") || !document.querySelector(".explorer-search input") || !document.querySelector(".explorer-view-toggle")) return { ok: false, error: "The File Explorer controls were not rendered." };
     const smokeToken = "smoke-" + Date.now();
     const smokePdfName = "mathmargin-" + smokeToken + ".pdf";
     const smokeFolderName = "mathmargin-" + smokeToken + "-folder";
@@ -61,7 +62,7 @@ async function runUploadSmokeTest(window) {
     const folderStartedAt = Date.now();
     while (document.querySelector(".books-section h2")?.textContent !== smokeFolderName && Date.now() - folderStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
     if (document.querySelector(".books-section h2")?.textContent !== smokeFolderName) return { ok: false, error: "A PDF folder could not be created and opened." };
-    document.querySelector(".folder-breadcrumb")?.click();
+    document.querySelector(".explorer-up-button")?.click();
     const folderTileStartedAt = Date.now();
     while (!smokeFolderTiles().length && Date.now() - folderTileStartedAt < 3000) await new Promise(resolve => setTimeout(resolve, 100));
     if (!smokeFolderTiles().length) return { ok: false, folderCreated: true, error: "The new folder did not appear as a folder icon." };
@@ -83,14 +84,12 @@ async function runUploadSmokeTest(window) {
     await new Promise(resolve => setTimeout(resolve, 100));
     const folderSelect = uploadDialog.querySelector(".upload-folder-field select");
     if (!folderSelect) return { ok: false, folderCreated: true, error: "The upload folder picker was not rendered." };
-    if (!folderSelect.value) {
-      const smokeFolderOption = [...folderSelect.options].find(option => option.textContent === smokeFolderName);
-      if (!smokeFolderOption) return { ok: false, folderCreated: true, error: "The new folder was missing from the upload dialog." };
-      const setSelectValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
-      setSelectValue.call(folderSelect, smokeFolderOption.value);
-      folderSelect.dispatchEvent(new Event("change", { bubbles: true }));
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+    const smokeFolderOption = [...folderSelect.options].find(option => option.textContent === smokeFolderName);
+    if (!smokeFolderOption) return { ok: false, folderCreated: true, error: "The new folder was missing from the upload dialog." };
+    const setSelectValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+    setSelectValue.call(folderSelect, "");
+    folderSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 100));
     document.querySelector(".upload-type-dialog .confirm-upload-button")?.click();
     const startedAt = Date.now();
     while (Date.now() - startedAt < 15000) {
@@ -98,7 +97,23 @@ async function runUploadSmokeTest(window) {
       if (error) return { ok: false, error };
       if (smokeCards().length > initialSmokeCount) {
         if (!smokeCards().at(-1)?.querySelector(".document-type-badge.problem-set")) return { ok: false, folderCreated: true, typeSelected: true, error: "The uploaded PDF was not saved as a problem set." };
-        smokeCards().at(-1)?.querySelector(".open-button")?.click();
+        [...document.querySelectorAll(".folder-nav > button")].find(button => button.textContent?.includes("All PDFs"))?.click();
+        const allViewStartedAt = Date.now();
+        while ((!smokeCards().length || !smokeFolderTiles().length) && Date.now() - allViewStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+        const draggedCard = smokeCards()[0];
+        const destinationFolder = smokeFolderTiles()[0];
+        if (!draggedCard || !destinationFolder) return { ok: false, folderCreated: true, problemSetSaved: true, error: "The PDF and folder were not both visible for drag-and-drop." };
+        const moveTransfer = new DataTransfer();
+        draggedCard.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: moveTransfer }));
+        destinationFolder.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: moveTransfer }));
+        destinationFolder.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: moveTransfer }));
+        const moveStartedAt = Date.now();
+        while (smokeCards()[0]?.querySelector(".explorer-location")?.textContent !== smokeFolderName && Date.now() - moveStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+        if (smokeCards()[0]?.querySelector(".explorer-location")?.textContent !== smokeFolderName) return { ok: false, folderCreated: true, folderIconVisible: true, problemSetSaved: true, error: "Dragging the PDF onto the folder did not move it." };
+        smokeFolderTiles()[0].click();
+        await new Promise(resolve => setTimeout(resolve, 150));
+        if (!smokeCards().length || document.querySelector(".books-section h2")?.textContent !== smokeFolderName) return { ok: false, folderCreated: true, folderIconVisible: true, problemSetSaved: true, assignedByDrag: true, error: "The dragged PDF did not appear inside the folder." };
+        smokeCards()[0]?.querySelector(".open-button")?.click();
         const renderStartedAt = Date.now();
         while (!document.querySelector(".pdf-page-wrap canvas") && Date.now() - renderStartedAt < 10000) {
           const readerError = document.querySelector(".reader-toast")?.textContent?.replace("×", "").trim();
@@ -370,7 +385,7 @@ async function runUploadSmokeTest(window) {
         while (document.querySelector(".books-section h2")?.textContent === smokeFolderName && Date.now() - folderCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
         [...document.querySelectorAll(".folder-nav > button")].find(button => button.textContent?.includes("All PDFs"))?.click();
         await new Promise(resolve => setTimeout(resolve, 100));
-        return { ok: smokeCards().length === 0 && smokeFolderTiles().length === 0, folderCreated: true, folderIconVisible: true, folderIconOpened: true, typePicker: true, problemSetSaved: true, assignedToFolder: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: smokeCards().length === 0, folderCleanedUp: smokeFolderTiles().length === 0 };
+        return { ok: smokeCards().length === 0 && smokeFolderTiles().length === 0, folderCreated: true, folderIconVisible: true, folderIconOpened: true, explorerToolbar: true, explorerAddressBar: true, explorerSearch: true, explorerLayoutToggle: true, typePicker: true, problemSetSaved: true, assignedByDrag: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: smokeCards().length === 0, folderCleanedUp: smokeFolderTiles().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
