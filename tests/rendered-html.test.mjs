@@ -48,3 +48,19 @@ test("keeps storage, annotation, and safety contracts in source", async () => {
   assert.match(layout, /MathMargin/);
   await assert.rejects(access(new URL("app/_sites-preview/SkeletonPreview.tsx", root)));
 });
+
+test("keeps desktop PDF folders and document types persistent", async () => {
+  const [desktop, storage, types] = await Promise.all([
+    readFile(new URL("desktop/src/DesktopApp.tsx", root), "utf8"),
+    readFile(new URL("desktop/src/storage.ts", root), "utf8"),
+    readFile(new URL("lib/types.ts", root), "utf8"),
+  ]);
+  assert.match(types, /DocumentType = "textbook" \| "problem-set"/);
+  assert.match(types, /folderId\?: string \| null/);
+  assert.match(storage, /createObjectStore\("folders"/);
+  assert.match(storage, /export async function removeFolder/);
+  assert.match(desktop, /What kind of PDF is this\?/);
+  assert.match(desktop, /Problem set/);
+  assert.match(desktop, /Put it in a folder/);
+  assert.match(desktop, /Its PDFs will be kept and moved to Unfiled/);
+});

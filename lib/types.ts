@@ -7,10 +7,22 @@ export type DocumentRecord = {
   createdAt: string;
   updatedAt: string;
   lastOpenedAt: string;
+  documentType?: DocumentType;
+  folderId?: string | null;
   libraryOrder?: number;
   bookStructure?: BookStructureEntry[];
   bookStructureScannedAt?: string;
   bookStructureVersion?: number;
+};
+
+export type DocumentType = "textbook" | "problem-set";
+
+export type LibraryFolder = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  libraryOrder?: number;
 };
 
 export type BookStructureEntry = {

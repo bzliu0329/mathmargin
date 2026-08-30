@@ -1,9 +1,9 @@
-import type { AnnotationRecord, DocumentRecord } from "../../lib/types";
+import type { AnnotationRecord, DocumentRecord, LibraryFolder } from "../../lib/types";
 
 export type LocalDocument = DocumentRecord & { file: ArrayBuffer | Blob };
 
 const DB_NAME = "mathmargin-desktop-v2";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function openDatabase() {
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -17,10 +17,38 @@ function openDatabase() {
         const store = database.createObjectStore("annotations", { keyPath: "id" });
         store.createIndex("documentId", "documentId", { unique: false });
       }
+      if (!database.objectStoreNames.contains("folders")) database.createObjectStore("folders", { keyPath: "id" });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+export async function listFolders() {
+  const database = await openDatabase();
+  const values = await requestResult(database.transaction("folders", "readonly").objectStore("folders").getAll()) as LibraryFolder[];
+  database.close();
+  return values.sort((left, right) => (left.libraryOrder ?? Number.MAX_SAFE_INTEGER) - (right.libraryOrder ?? Number.MAX_SAFE_INTEGER) || left.name.localeCompare(right.name));
+}
+
+export async function putFolder(folder: LibraryFolder) {
+  const database = await openDatabase();
+  const transaction = database.transaction("folders", "readwrite");
+  transaction.objectStore("folders").put(folder);
+  await transactionDone(transaction);
+  database.close();
+}
+
+export async function removeFolder(id: string) {
+  const database = await openDatabase();
+  const transaction = database.transaction(["folders", "documents"], "readwrite");
+  transaction.objectStore("folders").delete(id);
+  const documentStore = transaction.objectStore("documents");
+  const documents = await requestResult(documentStore.getAll()) as LocalDocument[];
+  const now = new Date().toISOString();
+  for (const document of documents) if (document.folderId === id) documentStore.put({ ...document, folderId: null, updatedAt: now });
+  await transactionDone(transaction);
+  database.close();
 }
 
 function requestResult<T>(request: IDBRequest<T>) {

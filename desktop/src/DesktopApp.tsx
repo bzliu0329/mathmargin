@@ -3,9 +3,9 @@ import type { EditorView } from "@codemirror/view";
 import { Document, Page, pdfjs } from "react-pdf";
 import katex from "katex";
 import "katex/contrib/mhchem/mhchem.js";
-import type { AnnotationColor, AnnotationGeometry, AnnotationRecord, BookStructureEntry, DocumentRecord, NormalizedRect } from "../../lib/types";
+import type { AnnotationColor, AnnotationGeometry, AnnotationRecord, BookStructureEntry, DocumentRecord, DocumentType, LibraryFolder, NormalizedRect } from "../../lib/types";
 import { ANNOTATION_COLORS, MAX_PDF_SIZE } from "../../lib/types";
-import { getAnnotation, getDocument, listAllAnnotations, listAnnotations, listDocuments, putAnnotation, putDocument, removeAnnotation, removeDocument, type LocalDocument } from "./storage";
+import { getAnnotation, getDocument, listAllAnnotations, listAnnotations, listDocuments, listFolders, putAnnotation, putDocument, putFolder, removeAnnotation, removeDocument, removeFolder, type LocalDocument } from "./storage";
 import { LATEX_SUITE_SHORTCUT_COUNT } from "./latexSuite";
 import { BOOK_STRUCTURE_VERSION, extractBookStructure } from "./bookStructure";
 import { LiveNoteEditor } from "./LiveNoteEditor";
@@ -28,6 +28,8 @@ function clamp(value: number, min = 0, max = 1) { return Math.min(max, Math.max(
 function isTextGeometry(value: AnnotationGeometry): value is { rects: NormalizedRect[] } { return "rects" in value; }
 function message(error: unknown, fallback: string) { return error instanceof Error ? error.message : fallback; }
 function formatSize(bytes: number) { return bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`; }
+function documentTypeOf(document: DocumentRecord): DocumentType { return document.documentType ?? "textbook"; }
+function documentTypeLabel(type: DocumentType) { return type === "problem-set" ? "Problem set" : "Textbook"; }
 function resizeAreaRect(rect: NormalizedRect, handle: AreaResizeHandle, deltaX: number, deltaY: number) {
   const minimum = .015;
   let left = rect.x;
@@ -162,7 +164,7 @@ export function DesktopApp() {
   function removeBook(id: string) { closeBook(id); }
 
   return <div className="desktop-app-shell">
-    <nav className="book-tabs desktop-drag-region" aria-label="Open textbooks">
+    <nav className="book-tabs desktop-drag-region" aria-label="Open PDFs">
       <button type="button" className={`library-tab ${!activeId ? "active" : ""}`} onClick={() => { location.hash = ""; }} aria-label="Open library" title="Library"><span className="brand-mark">M</span><span>Library</span></button>
       <div className="book-tab-list">{openBooks.map((book) => <div className={`book-tab ${activeId === book.id ? "active" : ""}`} key={book.id}><button type="button" className="book-tab-title" onClick={() => { location.hash = `/reader/${book.id}`; }} title={book.title}>{book.title}</button><button type="button" className="book-tab-close" onClick={() => closeBook(book.id)} aria-label={`Close ${book.title}`} title="Close tab">×</button></div>)}</div>
     </nav>
@@ -184,23 +186,41 @@ function BookCover({ document, onOpen }: { document: LocalDocument; onOpen: () =
 
 function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: LocalDocument) => void; onRename: (id: string, title: string) => void; onDelete: (id: string) => void }) {
   const [documents, setDocuments] = useState<LocalDocument[]>([]);
+  const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState("");
+  const [libraryView, setLibraryView] = useState("all");
+  const [pendingUpload, setPendingUpload] = useState<File | null>(null);
+  const [pendingDocumentType, setPendingDocumentType] = useState<DocumentType>("textbook");
+  const [pendingFolderId, setPendingFolderId] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [folderName, setFolderName] = useState("");
   const [editingId, setEditingId] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
   const [draggedId, setDraggedId] = useState("");
   const [dropTargetId, setDropTargetId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { listDocuments().then(setDocuments).catch((cause) => setError(message(cause, "Your library could not be opened."))).finally(() => setLoading(false)); }, []);
+  useEffect(() => {
+    Promise.all([listDocuments(), listFolders()]).then(([savedDocuments, savedFolders]) => {
+      setDocuments(savedDocuments); setFolders(savedFolders);
+    }).catch((cause) => setError(message(cause, "Your library could not be opened."))).finally(() => setLoading(false));
+  }, []);
 
-  async function upload(file?: File) {
+  function chooseUpload(file?: File) {
     if (!file || uploading) return;
     setError("");
     if (file.size > MAX_PDF_SIZE) return setError("This PDF is larger than the 120 MB limit.");
     if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) return setError("Choose a PDF file to continue.");
+    setPendingUpload(file); setPendingDocumentType("textbook");
+    setPendingFolderId(libraryView.startsWith("folder:") ? libraryView.slice(7) : "");
+  }
+
+  async function upload() {
+    const file = pendingUpload;
+    if (!file || uploading) return;
     setUploading(true);
     let stage = "reading the file";
     try {
@@ -212,6 +232,7 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
       const record: LocalDocument = {
         id: crypto.randomUUID(), title: file.name.replace(/\.pdf$/i, ""), originalFilename: file.name,
         fileSize: file.size, pageCount: pdf.numPages, createdAt: now, updatedAt: now, lastOpenedAt: now, libraryOrder: 0,
+        documentType: pendingDocumentType, folderId: pendingFolderId || null,
         file: data,
       };
       stage = "closing the PDF validator";
@@ -220,10 +241,46 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
       const reordered = [record, ...documents].map((document, index) => ({ ...document, libraryOrder: index }));
       await Promise.all(reordered.map(putDocument));
       setDocuments(reordered);
+      if (pendingFolderId) setLibraryView(`folder:${pendingFolderId}`);
+      else setLibraryView(pendingDocumentType === "problem-set" ? "problem-sets" : "textbooks");
+      setPendingUpload(null);
     } catch (cause) {
       const detail = message(cause, "This PDF could not be read.");
       setError(/password/i.test(detail) ? "Password-protected PDFs are not supported yet." : /invalid|format|missing pdf/i.test(detail) ? "This PDF appears to be corrupted or invalid." : `${detail} (${stage})`);
     } finally { setUploading(false); if (inputRef.current) inputRef.current.value = ""; }
+  }
+
+  function cancelUpload() { if (uploading) return; setPendingUpload(null); if (inputRef.current) inputRef.current.value = ""; }
+
+  async function createFolder() {
+    const name = folderName.trim(); if (!name) return;
+    const now = new Date().toISOString();
+    const folder: LibraryFolder = { id: crypto.randomUUID(), name: name.slice(0, 80), createdAt: now, updatedAt: now, libraryOrder: folders.length };
+    try { await putFolder(folder); setFolders((current) => [...current, folder]); setFolderName(""); setCreatingFolder(false); setLibraryView(`folder:${folder.id}`); }
+    catch (cause) { setError(message(cause, "The folder could not be created.")); }
+  }
+
+  async function renameFolder(folder: LibraryFolder) {
+    const name = prompt("Rename folder", folder.name)?.trim(); if (!name || name === folder.name) return;
+    const updated = { ...folder, name: name.slice(0, 80), updatedAt: new Date().toISOString() };
+    try { await putFolder(updated); setFolders((current) => current.map((item) => item.id === folder.id ? updated : item)); }
+    catch (cause) { setError(message(cause, "The folder could not be renamed.")); }
+  }
+
+  async function discardFolder(folder: LibraryFolder) {
+    if (!confirm(`Delete the folder “${folder.name}”? Its PDFs will be kept and moved to Unfiled.`)) return;
+    try {
+      await removeFolder(folder.id);
+      setFolders((current) => current.filter((item) => item.id !== folder.id));
+      setDocuments((current) => current.map((document) => document.folderId === folder.id ? { ...document, folderId: null, updatedAt: new Date().toISOString() } : document));
+      if (libraryView === `folder:${folder.id}`) setLibraryView("unfiled");
+    } catch (cause) { setError(message(cause, "The folder could not be deleted.")); }
+  }
+
+  async function moveDocument(document: LocalDocument, folderId: string) {
+    const updated = { ...document, folderId: folderId || null, updatedAt: new Date().toISOString() };
+    try { await putDocument(updated); setDocuments((current) => current.map((item) => item.id === document.id ? updated : item)); }
+    catch (cause) { setError(message(cause, "The PDF could not be moved.")); }
   }
 
   async function rename(document: LocalDocument) {
@@ -252,30 +309,49 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
     const [moved] = next.splice(from, 1); next.splice(to, 0, moved);
     void commitOrder(next);
   }
-  function moveBookBy(id: string, delta: number) {
-    const from = documents.findIndex((document) => document.id === id);
-    const to = clamp(from + delta, 0, documents.length - 1);
-    if (from < 0 || from === to) return;
-    const next = [...documents];
-    const [moved] = next.splice(from, 1); next.splice(to, 0, moved);
-    void commitOrder(next);
+  const visibleDocuments = documents.filter((document) => {
+    if (libraryView === "textbooks") return documentTypeOf(document) === "textbook";
+    if (libraryView === "problem-sets") return documentTypeOf(document) === "problem-set";
+    if (libraryView === "unfiled") return !document.folderId;
+    if (libraryView.startsWith("folder:")) return document.folderId === libraryView.slice(7);
+    return true;
+  });
+  const selectedFolder = libraryView.startsWith("folder:") ? folders.find((folder) => folder.id === libraryView.slice(7)) : undefined;
+  const viewTitle = selectedFolder?.name ?? (libraryView === "textbooks" ? "Textbooks" : libraryView === "problem-sets" ? "Problem sets" : libraryView === "unfiled" ? "Unfiled PDFs" : "All PDFs");
+  function moveVisibleBookBy(id: string, delta: number) {
+    const index = visibleDocuments.findIndex((document) => document.id === id);
+    const target = visibleDocuments[index + delta]; if (target) moveBook(id, target.id);
   }
 
   return <main className="library-shell desktop-library">
     <header className="library-header desktop-drag-region"><div className="brand"><span className="brand-mark">M</span><span>MathMargin</span></div><span className="desktop-local-pill">Stored locally · works offline</span></header>
-    <section className="library-hero"><div><p className="eyebrow">Your mathematical reading room</p><h1>Read closely.<br />Think in the margins.</h1><p className="hero-copy">Upload a textbook, highlight the ideas that matter, and keep notes with beautifully rendered LaTeX right beside the page.</p></div><div>
-      <label className={`upload-card ${dragging ? "is-dragging" : ""} ${uploading ? "is-uploading" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); upload(event.dataTransfer.files[0]); }}>
-        <input ref={inputRef} type="file" accept="application/pdf,.pdf" onChange={(event) => upload(event.target.files?.[0])} />
-        <span className="upload-icon">{uploading ? "…" : "↑"}</span><strong>{uploading ? "Reading and saving your PDF…" : "Drop a PDF here"}</strong><span>{uploading ? "This can take a moment for a large textbook" : "or choose a file from your computer"}</span><small>PDF · up to 120 MB</small>
+    <section className="library-hero"><div><p className="eyebrow">Your mathematical reading room</p><h1>Read closely.<br />Think in the margins.</h1><p className="hero-copy">Organize textbooks and problem sets, mark the ideas that matter, and keep beautifully rendered LaTeX notes beside every page.</p></div><div>
+      <label className={`upload-card ${dragging ? "is-dragging" : ""} ${uploading ? "is-uploading" : ""}`} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); chooseUpload(event.dataTransfer.files[0]); }}>
+        <input ref={inputRef} type="file" accept="application/pdf,.pdf" onChange={(event) => chooseUpload(event.target.files?.[0])} />
+        <span className="upload-icon">{uploading ? "…" : "↑"}</span><strong>{uploading ? "Reading and saving your PDF…" : "Add a PDF"}</strong><span>{uploading ? "This can take a moment for a large file" : "Textbooks, problem sets, and more"}</span><small>PDF · up to 120 MB</small>
       </label>{error && <div className="library-error" role="alert"><span>!</span>{error}<button onClick={() => setError("")}>×</button></div>}
     </div></section>
-    <section className="books-section"><div className="section-heading"><div><p className="eyebrow">Local library</p><h2>Your textbooks</h2></div><span className="book-count">{documents.length} {documents.length === 1 ? "book" : "books"}</span></div>
-      {loading ? <div className="loading-row"><span className="spinner" /> Opening your library…</div> : !documents.length ? <div className="empty-library"><div className="empty-glyph">∫</div><div><h3>Your library is ready</h3><p>Upload your first textbook to begin making mathematical notes.</p></div><button className="text-button" onClick={() => inputRef.current?.click()}>Choose PDF</button></div> :
-        <div className="book-grid">{documents.map((document, index) => <article className={`book-card ${draggedId === document.id ? "is-dragging" : ""} ${dropTargetId === document.id ? "is-drop-target" : ""}`} key={document.id} draggable={editingId !== document.id} onDragStart={(event) => { setDraggedId(document.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", document.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropTargetId(document.id); }} onDragLeave={() => setDropTargetId((current) => current === document.id ? "" : current)} onDrop={(event) => { event.preventDefault(); moveBook(event.dataTransfer.getData("text/plain") || draggedId, document.id); setDraggedId(""); setDropTargetId(""); }} onDragEnd={() => { setDraggedId(""); setDropTargetId(""); }}>
+    <section className="library-workspace">
+      <aside className="library-folders" aria-label="PDF folders"><div className="folder-heading"><span>Library</span><button type="button" className="new-folder-button" onClick={() => setCreatingFolder((current) => !current)}>+ Folder</button></div>
+        {creatingFolder && <form className="folder-create-form" onSubmit={(event) => { event.preventDefault(); void createFolder(); }}><input className="folder-name-input" value={folderName} onChange={(event) => setFolderName(event.target.value)} placeholder="Folder name" autoFocus maxLength={80} /><button disabled={!folderName.trim()}>Create</button></form>}
+        <nav className="folder-nav">
+          <button className={libraryView === "all" ? "active" : ""} onClick={() => setLibraryView("all")}><span>All PDFs</span><small>{documents.length}</small></button>
+          <button className={libraryView === "textbooks" ? "active" : ""} onClick={() => setLibraryView("textbooks")}><span>Textbooks</span><small>{documents.filter((document) => documentTypeOf(document) === "textbook").length}</small></button>
+          <button className={libraryView === "problem-sets" ? "active" : ""} onClick={() => setLibraryView("problem-sets")}><span>Problem sets</span><small>{documents.filter((document) => documentTypeOf(document) === "problem-set").length}</small></button>
+          <button className={libraryView === "unfiled" ? "active" : ""} onClick={() => setLibraryView("unfiled")}><span>Unfiled</span><small>{documents.filter((document) => !document.folderId).length}</small></button>
+        </nav>
+        {!!folders.length && <div className="folder-list-heading">Folders</div>}
+        <div className="custom-folder-list">{folders.map((folder) => <div className={`custom-folder-row ${libraryView === `folder:${folder.id}` ? "active" : ""}`} key={folder.id}><button className="folder-select-button" onClick={() => setLibraryView(`folder:${folder.id}`)}><span>{folder.name}</span><small>{documents.filter((document) => document.folderId === folder.id).length}</small></button><div className="folder-row-actions"><button type="button" onClick={() => void renameFolder(folder)} aria-label={`Rename ${folder.name}`} title="Rename folder">✎</button><button type="button" onClick={() => void discardFolder(folder)} aria-label={`Delete ${folder.name}`} title="Delete folder">×</button></div></div>)}</div>
+      </aside>
+      <section className="books-section"><div className="section-heading"><div><p className="eyebrow">Local library</p><h2>{viewTitle}</h2></div><span className="book-count">{visibleDocuments.length} {visibleDocuments.length === 1 ? "PDF" : "PDFs"}</span></div>
+      {loading ? <div className="loading-row"><span className="spinner" /> Opening your library…</div> : !documents.length ? <div className="empty-library"><div className="empty-glyph">∫</div><div><h3>Your library is ready</h3><p>Add your first textbook or problem set to begin making mathematical notes.</p></div><button className="text-button" onClick={() => inputRef.current?.click()}>Choose PDF</button></div> : !visibleDocuments.length ? <div className="empty-library filtered-empty"><div className="empty-glyph">∅</div><div><h3>Nothing here yet</h3><p>Add a PDF here or move one from another library view.</p></div><button className="text-button" onClick={() => inputRef.current?.click()}>Add PDF</button></div> :
+        <div className="book-grid">{visibleDocuments.map((document, index) => <article className={`book-card ${draggedId === document.id ? "is-dragging" : ""} ${dropTargetId === document.id ? "is-drop-target" : ""}`} key={document.id} draggable={editingId !== document.id} onDragStart={(event) => { setDraggedId(document.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", document.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropTargetId(document.id); }} onDragLeave={() => setDropTargetId((current) => current === document.id ? "" : current)} onDrop={(event) => { event.preventDefault(); moveBook(event.dataTransfer.getData("text/plain") || draggedId, document.id); setDraggedId(""); setDropTargetId(""); }} onDragEnd={() => { setDraggedId(""); setDropTargetId(""); }}>
           <BookCover document={document} onOpen={() => onOpen(document)} />
-          <div className="book-info">{editingId === document.id ? <form className="rename-form" onSubmit={(event) => { event.preventDefault(); rename(document); }}><input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} autoFocus /><button>Save</button><button type="button" onClick={() => setEditingId("")}>Cancel</button></form> : <button className="desktop-book-title" onClick={() => onOpen(document)}><h3>{document.title}</h3></button>}<p>{formatSize(document.fileSize)} · {document.pageCount} pages</p><div className="book-position-actions" aria-label={`Move ${document.title}`}><span>Drag to reorder</span><button type="button" onClick={() => moveBookBy(document.id, -1)} disabled={index === 0} aria-label={`Move ${document.title} earlier`}>←</button><button type="button" onClick={() => moveBookBy(document.id, 1)} disabled={index === documents.length - 1} aria-label={`Move ${document.title} later`}>→</button></div><div className="book-actions"><button className="open-button" onClick={() => onOpen(document)}>Open textbook <span>→</span></button><button onClick={() => { setEditingId(document.id); setDraftTitle(document.title); }}>Rename</button><button className="danger-action" onClick={() => discard(document)}>Delete</button></div></div>
+          <div className="book-info"><div className={`document-type-badge ${documentTypeOf(document)}`}>{documentTypeLabel(documentTypeOf(document))}</div>{editingId === document.id ? <form className="rename-form" onSubmit={(event) => { event.preventDefault(); rename(document); }}><input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} autoFocus /><button>Save</button><button type="button" onClick={() => setEditingId("")}>Cancel</button></form> : <button className="desktop-book-title" onClick={() => onOpen(document)}><h3>{document.title}</h3></button>}<p>{formatSize(document.fileSize)} · {document.pageCount} pages</p><label className="book-folder-field"><span>Folder</span><select value={document.folderId ?? ""} onChange={(event) => void moveDocument(document, event.target.value)}><option value="">Unfiled</option>{folders.map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select></label><div className="book-position-actions" aria-label={`Move ${document.title}`}><span>Drag to reorder</span><button type="button" onClick={() => moveVisibleBookBy(document.id, -1)} disabled={index === 0} aria-label={`Move ${document.title} earlier`}>←</button><button type="button" onClick={() => moveVisibleBookBy(document.id, 1)} disabled={index === visibleDocuments.length - 1} aria-label={`Move ${document.title} later`}>→</button></div><div className="book-actions"><button className="open-button" onClick={() => onOpen(document)}>Open PDF <span>→</span></button><button onClick={() => { setEditingId(document.id); setDraftTitle(document.title); }}>Rename</button><button className="danger-action" onClick={() => discard(document)}>Delete</button></div></div>
         </article>)}</div>}
+      </section>
     </section>
+    {pendingUpload && <div className="library-modal-backdrop"><section className="library-modal upload-type-dialog" role="dialog" aria-modal="true" aria-labelledby="upload-dialog-title"><button type="button" className="modal-close-button" onClick={cancelUpload} disabled={uploading} aria-label="Cancel upload">×</button><p className="eyebrow">Add to your library</p><h2 id="upload-dialog-title">What kind of PDF is this?</h2><p className="upload-file-name" title={pendingUpload.name}>{pendingUpload.name}</p><div className="document-type-grid" role="radiogroup" aria-label="PDF type"><button type="button" role="radio" aria-checked={pendingDocumentType === "textbook"} className={`document-type-option ${pendingDocumentType === "textbook" ? "selected" : ""}`} onClick={() => setPendingDocumentType("textbook")}><span className="document-type-icon">T</span><strong>Textbook</strong><small>Chapters, sections, and reading notes</small></button><button type="button" role="radio" aria-checked={pendingDocumentType === "problem-set"} className={`document-type-option ${pendingDocumentType === "problem-set" ? "selected" : ""}`} onClick={() => setPendingDocumentType("problem-set")}><span className="document-type-icon">P</span><strong>Problem set</strong><small>Exercises, assignments, and solutions</small></button></div><label className="upload-folder-field"><span>Put it in a folder</span><select value={pendingFolderId} onChange={(event) => setPendingFolderId(event.target.value)}><option value="">Unfiled</option>{folders.map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select></label><div className="modal-actions"><button type="button" onClick={cancelUpload} disabled={uploading}>Cancel</button><button type="button" className="confirm-upload-button" onClick={() => void upload()} disabled={uploading}>{uploading ? "Adding PDF…" : "Add to library"}</button></div></section></div>}
   </main>;
 }
 
@@ -321,7 +397,7 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
 
   useEffect(() => {
     Promise.all([getDocument(documentId), listAnnotations(documentId)]).then(async ([record, saved]) => {
-      if (!record) throw new Error("This textbook was not found in the local library.");
+      if (!record) throw new Error("This PDF was not found in the local library.");
       const opened = { ...record, lastOpenedAt: new Date().toISOString() }; await putDocument(opened);
       setDocument(opened); setAnnotations(saved); setBookStructure(opened.bookStructure ?? []);
       const pendingAnnotationId = sessionStorage.getItem("mathmargin:open-annotation");
@@ -331,7 +407,7 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
         sessionStorage.removeItem("mathmargin:open-annotation");
       }
       if (opened.bookStructureScannedAt && opened.bookStructureVersion === BOOK_STRUCTURE_VERSION) setStructureState(opened.bookStructure?.length ? "ready" : "empty");
-    }).catch((cause) => setError(message(cause, "This textbook could not be opened."))).finally(() => setLoading(false));
+    }).catch((cause) => setError(message(cause, "This PDF could not be opened."))).finally(() => setLoading(false));
   }, [documentId]);
   useEffect(() => {
     if (!isActive) return;
@@ -353,7 +429,7 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
     Promise.all([listDocuments(), listAllAnnotations()]).then(([documents, saved]) => {
       const summaries: DocumentRecord[] = documents.map((item) => ({
         id: item.id, title: item.title, originalFilename: item.originalFilename, fileSize: item.fileSize, pageCount: item.pageCount,
-        createdAt: item.createdAt, updatedAt: item.updatedAt, lastOpenedAt: item.lastOpenedAt, bookStructure: item.bookStructure,
+        createdAt: item.createdAt, updatedAt: item.updatedAt, lastOpenedAt: item.lastOpenedAt, documentType: item.documentType, folderId: item.folderId, bookStructure: item.bookStructure,
         bookStructureScannedAt: item.bookStructureScannedAt, bookStructureVersion: item.bookStructureVersion,
       }));
       if (!cancelled) { setLinkLibrary({ documents: summaries, annotations: saved }); setLinkLibraryState("ready"); }
@@ -638,8 +714,8 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
   const notesFontScale = clamp(1 + (sidebarWidth - 360) / 1800, 1, 1.2);
   const readerStyle = { "--notes-width": `${sidebarWidth}px`, "--notes-font-scale": notesFontScale } as CSSProperties;
   const readerBodyStyle = sidebarOpen ? { gridTemplateColumns: `minmax(0, 1fr) ${Math.min(sidebarWidth, sidebarMaximum)}px` } : undefined;
-  if (loading) return <main className="reader-status"><span className="spinner" /><h1>Opening your textbook…</h1></main>;
-  if (!document) return <main className="reader-status"><div className="error-orbit">!</div><h1>We couldn’t open this textbook</h1><p>{error}</p><button className="primary-button" onClick={onBack}>Return to library</button></main>;
+  if (loading) return <main className="reader-status"><span className="spinner" /><h1>Opening your PDF…</h1></main>;
+  if (!document) return <main className="reader-status"><div className="error-orbit">!</div><h1>We couldn’t open this PDF</h1><p>{error}</p><button className="primary-button" onClick={onBack}>Return to library</button></main>;
 
   return <main className={`reader-shell ${sidebarOpen ? "sidebar-is-open" : ""} ${resizingSidebar ? "is-resizing-sidebar" : ""}`} style={readerStyle}>
     <header className="reader-header desktop-drag-region"><button className="brand compact desktop-back-brand" onClick={onBack}><span className="brand-mark">M</span><span>MathMargin</span></button><div className="reader-title"><strong>{document.title}</strong><span>{document.pageCount} pages · stored locally</span></div><div className="save-indicator" data-state={saveState}><span />{saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved"}</div></header>

@@ -39,17 +39,68 @@ async function runUploadSmokeTest(window) {
     const bytes = Uint8Array.from(atob(encoded), character => character.charCodeAt(0));
     const input = document.querySelector('input[type="file"]');
     if (!input) return { ok: false, error: "The upload input was not rendered." };
-    const smokeCards = () => [...document.querySelectorAll(".book-card")].filter(card => card.textContent?.includes("mathmargin-smoke"));
+    const smokeToken = "smoke-" + Date.now();
+    const smokePdfName = "mathmargin-" + smokeToken + ".pdf";
+    const smokeFolderName = "mathmargin-" + smokeToken + "-folder";
+    const smokeCards = () => [...document.querySelectorAll(".book-card")].filter(card => card.textContent?.includes(smokeToken));
+    const smokeFolders = () => [...document.querySelectorAll(".custom-folder-row")].filter(row => row.textContent?.includes(smokeFolderName));
+    const staleSmokeCards = () => [...document.querySelectorAll(".book-card")].filter(card => card.textContent?.includes("mathmargin-smoke"));
+    const staleSmokeFolders = () => [...document.querySelectorAll(".custom-folder-row")].filter(row => row.textContent?.includes("mathmargin-smoke"));
+    window.confirm = () => true;
+    const initialCleanupStartedAt = Date.now();
+    while (staleSmokeCards().length && Date.now() - initialCleanupStartedAt < 10000) {
+      const card = staleSmokeCards()[0];
+      [...card.querySelectorAll("button")].find(button => button.textContent?.trim() === "Delete")?.click();
+      await new Promise(resolve => setTimeout(resolve, 120));
+    }
+    while (staleSmokeFolders().length && Date.now() - initialCleanupStartedAt < 10000) {
+      staleSmokeFolders()[0].querySelector('.folder-row-actions button[title="Delete folder"]')?.click();
+      await new Promise(resolve => setTimeout(resolve, 120));
+    }
+    const folderButton = document.querySelector(".new-folder-button");
+    if (!folderButton) return { ok: false, error: "The new-folder control was not rendered." };
+    folderButton.click();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const folderInput = document.querySelector(".folder-name-input");
+    if (!folderInput) return { ok: false, error: "The folder name input was not rendered." };
+    const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    setInputValue.call(folderInput, smokeFolderName);
+    folderInput.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 100));
+    document.querySelector(".folder-create-form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    const folderStartedAt = Date.now();
+    while (!smokeFolders().length && Date.now() - folderStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+    if (!smokeFolders().length) return { ok: false, error: "A PDF folder could not be created." };
     const initialSmokeCount = smokeCards().length;
     const transfer = new DataTransfer();
-    transfer.items.add(new File([bytes], "mathmargin-smoke.pdf", { type: "application/pdf" }));
+    transfer.items.add(new File([bytes], smokePdfName, { type: "application/pdf" }));
     Object.defineProperty(input, "files", { configurable: true, value: transfer.files });
     input.dispatchEvent(new Event("change", { bubbles: true }));
+    const dialogStartedAt = Date.now();
+    while (!document.querySelector(".upload-type-dialog") && Date.now() - dialogStartedAt < 3000) await new Promise(resolve => setTimeout(resolve, 100));
+    const uploadDialog = document.querySelector(".upload-type-dialog");
+    if (!uploadDialog) return { ok: false, folderCreated: true, error: "The PDF type picker did not open." };
+    const problemSetOption = [...uploadDialog.querySelectorAll(".document-type-option")].find(button => button.textContent?.includes("Problem set"));
+    if (!problemSetOption) return { ok: false, folderCreated: true, error: "The Problem set option was not rendered." };
+    problemSetOption.click();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const folderSelect = uploadDialog.querySelector(".upload-folder-field select");
+    if (!folderSelect) return { ok: false, folderCreated: true, error: "The upload folder picker was not rendered." };
+    if (!folderSelect.value) {
+      const smokeFolderOption = [...folderSelect.options].find(option => option.textContent === smokeFolderName);
+      if (!smokeFolderOption) return { ok: false, folderCreated: true, error: "The new folder was missing from the upload dialog." };
+      const setSelectValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+      setSelectValue.call(folderSelect, smokeFolderOption.value);
+      folderSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    document.querySelector(".upload-type-dialog .confirm-upload-button")?.click();
     const startedAt = Date.now();
     while (Date.now() - startedAt < 15000) {
       const error = document.querySelector(".library-error")?.textContent?.replace("×", "").trim();
       if (error) return { ok: false, error };
       if (smokeCards().length > initialSmokeCount) {
+        if (!smokeCards().at(-1)?.querySelector(".document-type-badge.problem-set")) return { ok: false, folderCreated: true, typeSelected: true, error: "The uploaded PDF was not saved as a problem set." };
         smokeCards().at(-1)?.querySelector(".open-button")?.click();
         const renderStartedAt = Date.now();
         while (!document.querySelector(".pdf-page-wrap canvas") && Date.now() - renderStartedAt < 10000) {
@@ -317,11 +368,14 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: smokeCards().length === 0 };
+        for (const row of smokeFolders()) row.querySelector('.folder-row-actions button[title="Delete folder"]')?.click();
+        const folderCleanupStartedAt = Date.now();
+        while (smokeFolders().length && Date.now() - folderCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+        return { ok: smokeCards().length === 0 && smokeFolders().length === 0, folderCreated: true, typePicker: true, problemSetSaved: true, assignedToFolder: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: smokeCards().length === 0, folderCleanedUp: smokeFolders().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    return { ok: false, error: "The upload did not finish within 15 seconds." };
+    return { ok: false, error: "The upload did not finish within 15 seconds.", dialogOpen: !!document.querySelector(".upload-type-dialog"), libraryError: document.querySelector(".library-error")?.textContent, viewTitle: document.querySelector(".books-section h2")?.textContent, cards: [...document.querySelectorAll(".book-card")].map(card => card.textContent?.slice(0, 120)) };
   })()`);
   fs.writeFileSync(path.join(app.getPath("temp"), "mathmargin-smoke-result.json"), JSON.stringify(result, null, 2));
   process.stdout.write(`MATHMARGIN_SMOKE:${JSON.stringify(result)}\n`);
