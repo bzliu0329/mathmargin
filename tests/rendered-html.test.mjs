@@ -59,6 +59,8 @@ test("keeps desktop PDF folders and optional textbook treatment persistent", asy
   assert.match(types, /folderId\?: string \| null/);
   assert.match(storage, /createObjectStore\("folders"/);
   assert.match(storage, /export async function removeFolder/);
+  assert.match(storage, /removedDocumentIds/);
+  assert.match(storage, /removedAnnotationIds/);
   assert.match(desktop, /Treat as textbook/);
   assert.match(desktop, /Automatically detect chapters and sections/);
   assert.match(desktop, /!treatsDocumentAsTextbook/);
@@ -76,5 +78,10 @@ test("keeps desktop PDF folders and optional textbook treatment persistent", asy
   assert.match(desktop, /folder-rename-dialog/);
   assert.match(desktop, /folder-delete-dialog/);
   assert.match(desktop, /folder-import-dialog/);
-  assert.match(desktop, /PDFs and all their annotations will be kept and moved to Unfiled/);
+  assert.match(desktop, /They will no longer appear in All PDFs/);
+  assert.match(desktop, /selectedDocumentIds/);
+  assert.match(desktop, /Ctrl\+click, Shift\+click/);
+  assert.match(desktop, /application\/x-mathmargin-document-ids/);
+  assert.match(desktop, /Move selected PDFs to folder/);
+  assert.match(desktop, /discardDocuments/);
 });

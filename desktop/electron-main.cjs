@@ -416,9 +416,11 @@ async function runUploadSmokeTest(window) {
         const folderImportInput = document.querySelector(".explorer-folder-input");
         if (!folderImportInput) return { ok: false, folderRenamed: true, folderDeleted: true, error: "The folder import control was not rendered." };
         const importFolderName = "mathmargin-import-" + smokeToken;
-        const importFile = new File([bytes], "imported-" + smokeToken + ".pdf", { type: "application/pdf" });
-        Object.defineProperty(importFile, "webkitRelativePath", { configurable: true, value: importFolderName + "/nested/imported-" + smokeToken + ".pdf" });
-        const importTransfer = new DataTransfer(); importTransfer.items.add(importFile);
+        const importFile = new File([bytes], "imported-" + smokeToken + "-one.pdf", { type: "application/pdf" });
+        const secondImportFile = new File([bytes], "imported-" + smokeToken + "-two.pdf", { type: "application/pdf" });
+        Object.defineProperty(importFile, "webkitRelativePath", { configurable: true, value: importFolderName + "/nested/imported-" + smokeToken + "-one.pdf" });
+        Object.defineProperty(secondImportFile, "webkitRelativePath", { configurable: true, value: importFolderName + "/nested/imported-" + smokeToken + "-two.pdf" });
+        const importTransfer = new DataTransfer(); importTransfer.items.add(importFile); importTransfer.items.add(secondImportFile);
         Object.defineProperty(folderImportInput, "files", { configurable: true, value: importTransfer.files });
         folderImportInput.dispatchEvent(new Event("change", { bubbles: true }));
         const importDialogStartedAt = Date.now();
@@ -431,15 +433,26 @@ async function runUploadSmokeTest(window) {
         document.querySelector(".confirm-folder-import-button")?.click();
         const importStartedAt = Date.now();
         while (document.querySelector(".books-section h2")?.textContent !== importFolderName && Date.now() - importStartedAt < 10000) await new Promise(resolve => setTimeout(resolve, 100));
-        const importedCard = [...document.querySelectorAll(".book-card")].find(card => card.textContent?.includes("imported-" + smokeToken));
-        if (!importedCard || document.querySelector(".books-section h2")?.textContent !== importFolderName || !importedCard.querySelector(".document-type-badge.textbook-structure")) return { ok: false, folderRenamed: true, folderDeleted: true, error: "The selected Windows folder was not imported with its textbook setting." };
-        [...importedCard.querySelectorAll("button")].find(button => button.textContent?.trim() === "Delete")?.click();
-        const importCardCleanupStartedAt = Date.now();
-        while ([...document.querySelectorAll(".book-card")].some(card => card.textContent?.includes("imported-" + smokeToken)) && Date.now() - importCardCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
-        document.querySelector(".delete-folder-command")?.click(); await new Promise(resolve => setTimeout(resolve, 100)); document.querySelector(".confirm-delete-folder-button")?.click();
+        const importedCards = [...document.querySelectorAll(".book-card")].filter(card => card.textContent?.includes("imported-" + smokeToken));
+        if (importedCards.length !== 2 || document.querySelector(".books-section h2")?.textContent !== importFolderName || importedCards.some(card => !card.querySelector(".document-type-badge.textbook-structure"))) return { ok: false, folderRenamed: true, folderDeleted: true, error: "The selected Windows folder was not imported with two textbook-enabled PDFs." };
+        importedCards.forEach(card => card.querySelector(".card-selection-toggle")?.click());
+        await new Promise(resolve => setTimeout(resolve, 150));
+        if (!document.querySelector(".explorer-status-bar")?.textContent?.includes("2 items selected") || document.querySelectorAll(".book-card.is-selected").length !== 2) return { ok: false, folderRenamed: true, folderDeleted: true, error: "Two PDFs could not be selected together." };
+        const bulkTextbookButton = document.querySelector(".explorer-command-bar .textbook-treatment-command");
+        if (!bulkTextbookButton?.textContent?.includes("Disable textbook structure")) return { ok: false, folderRenamed: true, folderDeleted: true, multiSelection: true, error: "The bulk textbook action did not reflect the selected PDFs." };
+        bulkTextbookButton.click();
+        const bulkActionStartedAt = Date.now();
+        while ([...document.querySelectorAll(".book-card")].some(card => card.querySelector(".document-type-badge.textbook-structure")) && Date.now() - bulkActionStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+        if ([...document.querySelectorAll(".book-card")].some(card => card.querySelector(".document-type-badge.textbook-structure"))) return { ok: false, folderRenamed: true, folderDeleted: true, multiSelection: true, error: "The bulk textbook action did not update every selected PDF." };
+        document.querySelector(".delete-folder-command")?.click(); await new Promise(resolve => setTimeout(resolve, 100));
+        const cascadeDialog = document.querySelector(".folder-delete-dialog");
+        if (!cascadeDialog?.textContent?.includes("2 PDFs") || !cascadeDialog.textContent?.includes("no longer appear in All PDFs")) return { ok: false, folderRenamed: true, folderDeleted: true, multiSelection: true, bulkTextbookAction: true, error: "Folder deletion did not warn that contained PDFs would be deleted." };
+        document.querySelector(".confirm-delete-folder-button")?.click();
         const importFolderCleanupStartedAt = Date.now();
         while (document.querySelector(".books-section h2")?.textContent === importFolderName && Date.now() - importFolderCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
-        return { ok: ![...document.querySelectorAll(".book-card")].some(card => card.textContent?.includes("imported-" + smokeToken)), folderCreated: true, folderRenamed: true, folderDeleted: true, folderImport: true, recursiveFolderImport: true, folderImportTextbookOption: true, folderIconVisible: true, folderIconOpened: true, explorerToolbar: true, explorerAddressBar: true, explorerSearch: true, explorerLayoutToggle: true, treatAsTextbookOption: true, readerTextbookToggle: true, textbookStructureSaved: true, assignedByDrag: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: true, folderCleanedUp: true };
+        const importedPdfStillVisible = [...document.querySelectorAll(".book-card")].some(card => card.textContent?.includes("imported-" + smokeToken));
+        const importedFolderStillVisible = [...document.querySelectorAll(".library-folder-tile")].some(tile => tile.textContent?.includes(importFolderName));
+        return { ok: !importedPdfStillVisible && !importedFolderStillVisible, folderCreated: true, folderRenamed: true, folderDeleted: true, folderCascadeDelete: true, folderImport: true, recursiveFolderImport: true, folderImportTextbookOption: true, multiSelection: true, bulkTextbookAction: true, folderIconVisible: true, folderIconOpened: true, explorerToolbar: true, explorerAddressBar: true, explorerSearch: true, explorerLayoutToggle: true, treatAsTextbookOption: true, readerTextbookToggle: true, textbookStructureSaved: true, assignedByDrag: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: true, folderCleanedUp: true };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }

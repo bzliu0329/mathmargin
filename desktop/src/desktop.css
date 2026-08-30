@@ -26,6 +26,10 @@ body { -webkit-font-smoothing: antialiased; }
 .explorer-command-bar .import-folder-command > span { font-size: .85rem; }
 .explorer-command-bar .rename-folder-command { border-color: #cad7d0; color: #35604f; }
 .explorer-command-bar .delete-folder-command { border-color: #e3c7c3; color: #99493f; }
+.bulk-move-control { height: 2rem; display: inline-flex; align-items: center; gap: .35rem; padding: 0 .35rem 0 .6rem; border: 1px solid transparent; border-radius: .38rem; color: #6c7771; font-size: .6rem; font-weight: 700; }
+.bulk-move-control.enabled { border-color: #d1d8d4; background: white; color: #425149; }
+.bulk-move-control select { max-width: 8rem; border: 0; outline: none; background: transparent; color: inherit; cursor: pointer; font-size: .61rem; }
+.bulk-move-control select:disabled { cursor: default; }
 .explorer-command-bar .textbook-treatment-command { border-color: #d2d8d4; }
 .explorer-command-bar .textbook-treatment-command.active { border-color: #9bb5a7; background: #e6f1ea; color: #37634f; }
 .command-folder-glyph, .tree-folder-glyph { position: relative; width: .95rem; height: .7rem; display: inline-block; border-radius: .1rem; background: #e9ba48; }
@@ -138,6 +142,7 @@ body { -webkit-font-smoothing: antialiased; }
 .folder-dialog-error { padding: .5rem .6rem; border-radius: .4rem; background: #fff0ed; color: #9b433b; font-size: .62rem; }
 .modal-actions .confirm-folder-button { border-color: var(--sage); background: var(--sage); color: white; }
 .delete-folder-glyph { width: 2.5rem; height: 2.5rem; display: grid; place-items: center; margin-bottom: .7rem; border-radius: 50%; background: #f7dfdb; color: #a94d42; font-size: 1.15rem; font-weight: 850; }
+.folder-delete-warning { padding: .55rem .65rem; border: 1px solid #e2c5c0; border-radius: .42rem; background: #fff1ee; color: #97483f; font-size: .63rem; font-weight: 750; }
 .modal-actions .confirm-delete-folder-button { border-color: #a84d43; background: #a84d43; color: white; }
 .folder-import-dialog { width: min(36rem, calc(100vw - 4rem)); }
 .folder-import-summary { display: flex; gap: .55rem; margin: .85rem 0; }
@@ -166,14 +171,18 @@ button, a, input, textarea, label { -webkit-app-region: no-drag; }
 .pdf-book-cover .react-pdf__Document, .pdf-book-cover .react-pdf__Page { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #dfe4e0; }
 .pdf-book-cover canvas { max-width: 100%; max-height: 100%; width: auto !important; height: auto !important; box-shadow: 0 3px 12px rgba(28,38,34,.18); }
 .cover-loading { display: inline-flex; align-items: center; gap: .45rem; color: #627068; font-size: .68rem; }
-.book-card { cursor: grab; transition: border-color .15s, box-shadow .15s, opacity .15s, transform .15s; }
+.book-card { position: relative; cursor: grab; transition: border-color .15s, box-shadow .15s, opacity .15s, transform .15s; }
 .book-card:active { cursor: grabbing; }
 .explorer-icons.book-grid { grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .85rem; padding-top: 1rem; }
 .explorer-icons .book-cover { height: 10rem; }
 .explorer-icons .book-info { padding: .75rem; }
 .book-card.is-selected { border-color: #6f9a85; background: #edf5f0; box-shadow: 0 0 0 2px rgba(73,128,101,.2); }
+.card-selection-toggle { position: absolute; z-index: 8; top: .45rem; left: .45rem; width: 1.35rem; height: 1.35rem; display: grid; place-items: center; padding: 0; border: 1px solid #aeb9b2; border-radius: .3rem; background: rgba(255,255,255,.9); color: white; cursor: pointer; font-size: .72rem; font-weight: 850; box-shadow: 0 2px 7px rgba(31,43,37,.14); opacity: 0; transition: opacity .12s, background .12s, border-color .12s; }
+.book-card:hover .card-selection-toggle, .book-card:focus-within .card-selection-toggle, .card-selection-toggle.selected { opacity: 1; }
+.card-selection-toggle.selected { border-color: #4c7d65; background: #4c7d65; }
 .book-card.is-selected .book-actions { display: flex; }
 .book-card:not(.is-selected) .book-actions { visibility: hidden; }
+.book-grid:has(.book-card.is-selected ~ .book-card.is-selected) .book-actions { visibility: hidden; }
 .explorer-location { display: block; margin-top: .3rem; overflow: hidden; color: #849088; font-size: .57rem; text-overflow: ellipsis; white-space: nowrap; }
 .explorer-details.book-grid { display: grid; grid-template-columns: 1fr; gap: .25rem; padding-top: .75rem; }
 .explorer-details .book-card { min-height: 5.3rem; display: grid; grid-template-columns: 4.2rem minmax(0, 1fr); border-radius: .35rem; box-shadow: none; }

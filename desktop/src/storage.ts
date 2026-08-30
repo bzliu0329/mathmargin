@@ -41,12 +41,24 @@ export async function putFolder(folder: LibraryFolder) {
 
 export async function removeFolder(id: string) {
   const database = await openDatabase();
-  const transaction = database.transaction(["folders", "documents"], "readwrite");
+  const transaction = database.transaction(["folders", "documents", "annotations"], "readwrite");
   transaction.objectStore("folders").delete(id);
   const documentStore = transaction.objectStore("documents");
   const documents = await requestResult(documentStore.getAll()) as LocalDocument[];
+  const removedDocumentIds = new Set(documents.filter((document) => document.folderId === id).map((document) => document.id));
+  for (const documentId of removedDocumentIds) documentStore.delete(documentId);
+  const annotationStore = transaction.objectStore("annotations");
+  const annotations = await requestResult(annotationStore.getAll()) as AnnotationRecord[];
+  const removedAnnotationIds = new Set(annotations.filter((annotation) => removedDocumentIds.has(annotation.documentId)).map((annotation) => annotation.id));
   const now = new Date().toISOString();
-  for (const document of documents) if (document.folderId === id) documentStore.put({ ...document, folderId: null, updatedAt: now });
+  for (const annotation of annotations) {
+    if (removedAnnotationIds.has(annotation.id)) {
+      annotationStore.delete(annotation.id);
+      continue;
+    }
+    const linkedAnnotationIds = annotation.linkedAnnotationIds?.filter((linkedId) => !removedAnnotationIds.has(linkedId));
+    if (linkedAnnotationIds?.length !== annotation.linkedAnnotationIds?.length) annotationStore.put({ ...annotation, linkedAnnotationIds, updatedAt: now });
+  }
   await transactionDone(transaction);
   database.close();
 }
