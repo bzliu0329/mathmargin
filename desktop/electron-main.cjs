@@ -90,10 +90,10 @@ async function runUploadSmokeTest(window) {
     const dialogStartedAt = Date.now();
     while (!document.querySelector(".upload-type-dialog") && Date.now() - dialogStartedAt < 3000) await new Promise(resolve => setTimeout(resolve, 100));
     const uploadDialog = document.querySelector(".upload-type-dialog");
-    if (!uploadDialog) return { ok: false, folderCreated: true, error: "The PDF type picker did not open." };
-    const problemSetOption = [...uploadDialog.querySelectorAll(".document-type-option")].find(button => button.textContent?.includes("Problem set"));
-    if (!problemSetOption) return { ok: false, folderCreated: true, error: "The Problem set option was not rendered." };
-    problemSetOption.click();
+    if (!uploadDialog) return { ok: false, folderCreated: true, error: "The PDF options dialog did not open." };
+    const textbookOption = uploadDialog.querySelector(".textbook-treatment-option input");
+    if (!textbookOption || textbookOption.checked) return { ok: false, folderCreated: true, error: "The optional Treat as textbook control was not rendered unchecked." };
+    textbookOption.click();
     await new Promise(resolve => setTimeout(resolve, 100));
     const folderSelect = uploadDialog.querySelector(".upload-folder-field select");
     if (!folderSelect) return { ok: false, folderCreated: true, error: "The upload folder picker was not rendered." };
@@ -109,23 +109,23 @@ async function runUploadSmokeTest(window) {
       const error = document.querySelector(".library-error")?.textContent?.replace("×", "").trim();
       if (error) return { ok: false, error };
       if (smokeCards().length > initialSmokeCount) {
-        if (!smokeCards().at(-1)?.querySelector(".document-type-badge.problem-set")) return { ok: false, folderCreated: true, typeSelected: true, error: "The uploaded PDF was not saved as a problem set." };
+        if (!smokeCards().at(-1)?.querySelector(".document-type-badge.textbook-structure")) return { ok: false, folderCreated: true, textbookOptionSelected: true, error: "The uploaded PDF did not retain its textbook structure setting." };
         [...document.querySelectorAll(".folder-nav > button")].find(button => button.textContent?.includes("All PDFs"))?.click();
         const allViewStartedAt = Date.now();
         while ((!smokeCards().length || !smokeFolderTiles().length) && Date.now() - allViewStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
         const draggedCard = smokeCards()[0];
         const destinationFolder = smokeFolderTiles()[0];
-        if (!draggedCard || !destinationFolder) return { ok: false, folderCreated: true, problemSetSaved: true, error: "The PDF and folder were not both visible for drag-and-drop." };
+        if (!draggedCard || !destinationFolder) return { ok: false, folderCreated: true, textbookStructureSaved: true, error: "The PDF and folder were not both visible for drag-and-drop." };
         const moveTransfer = new DataTransfer();
         draggedCard.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: moveTransfer }));
         destinationFolder.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: moveTransfer }));
         destinationFolder.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: moveTransfer }));
         const moveStartedAt = Date.now();
         while (smokeCards()[0]?.querySelector(".explorer-location")?.textContent !== smokeFolderName && Date.now() - moveStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
-        if (smokeCards()[0]?.querySelector(".explorer-location")?.textContent !== smokeFolderName) return { ok: false, folderCreated: true, folderIconVisible: true, problemSetSaved: true, error: "Dragging the PDF onto the folder did not move it." };
+        if (smokeCards()[0]?.querySelector(".explorer-location")?.textContent !== smokeFolderName) return { ok: false, folderCreated: true, folderIconVisible: true, textbookStructureSaved: true, error: "Dragging the PDF onto the folder did not move it." };
         smokeFolderTiles()[0].click();
         await new Promise(resolve => setTimeout(resolve, 150));
-        if (!smokeCards().length || document.querySelector(".books-section h2")?.textContent !== smokeFolderName) return { ok: false, folderCreated: true, folderIconVisible: true, problemSetSaved: true, assignedByDrag: true, error: "The dragged PDF did not appear inside the folder." };
+        if (!smokeCards().length || document.querySelector(".books-section h2")?.textContent !== smokeFolderName) return { ok: false, folderCreated: true, folderIconVisible: true, textbookStructureSaved: true, assignedByDrag: true, error: "The dragged PDF did not appear inside the folder." };
         smokeCards()[0]?.querySelector(".open-button")?.click();
         const renderStartedAt = Date.now();
         while (!document.querySelector(".pdf-page-wrap canvas") && Date.now() - renderStartedAt < 10000) {
@@ -286,6 +286,16 @@ async function runUploadSmokeTest(window) {
         sectionHeading.click();
         await new Promise(resolve => setTimeout(resolve, 100));
         if (pageInput.value !== sectionHeading.dataset.pageNumber) return { ok: false, uploaded: true, rendered: true, chapterGrouping: true, error: "Clicking a section heading did not jump to its page." };
+        const readerTextbookToggle = document.querySelector(".reader-textbook-toggle");
+        if (!readerTextbookToggle?.classList.contains("active")) return { ok: false, uploaded: true, rendered: true, chapterGrouping: true, error: "The reader did not show its textbook option as enabled." };
+        readerTextbookToggle.click();
+        const structureOffStartedAt = Date.now();
+        while (!document.querySelector(".structure-status.structure-off") && Date.now() - structureOffStartedAt < 3000) await new Promise(resolve => setTimeout(resolve, 100));
+        if (!document.querySelector(".structure-status.structure-off") || document.querySelector(".annotation-section-heading > span")?.textContent?.includes("Section 1.1")) return { ok: false, uploaded: true, rendered: true, chapterGrouping: true, error: "Disabling textbook treatment did not remove detected chapter and section grouping." };
+        document.querySelector(".structure-status.structure-off button")?.click();
+        const structureRestoredAt = Date.now();
+        while (!document.querySelector(".annotation-section-heading > span")?.textContent?.includes("Section 1.1") && Date.now() - structureRestoredAt < 10000) await new Promise(resolve => setTimeout(resolve, 100));
+        if (!document.querySelector(".annotation-section-heading > span")?.textContent?.includes("Section 1.1")) return { ok: false, uploaded: true, rendered: true, chapterGrouping: true, error: "Re-enabling textbook treatment did not restore chapter detection." };
         const areaTool = [...document.querySelectorAll(".tool-group button")].find(button => button.textContent?.includes("Area"));
         areaTool?.click();
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -414,18 +424,22 @@ async function runUploadSmokeTest(window) {
         const importDialogStartedAt = Date.now();
         while (!document.querySelector(".folder-import-dialog") && Date.now() - importDialogStartedAt < 3000) await new Promise(resolve => setTimeout(resolve, 100));
         if (!document.querySelector(".folder-import-dialog")) return { ok: false, folderRenamed: true, folderDeleted: true, error: "Selecting a Windows folder did not open the import dialog." };
+        const folderTextbookOption = document.querySelector(".folder-import-dialog .textbook-treatment-option input");
+        if (!folderTextbookOption || folderTextbookOption.checked) return { ok: false, folderRenamed: true, folderDeleted: true, error: "Folder import did not offer an optional textbook setting." };
+        folderTextbookOption.click();
+        await new Promise(resolve => setTimeout(resolve, 100));
         document.querySelector(".confirm-folder-import-button")?.click();
         const importStartedAt = Date.now();
         while (document.querySelector(".books-section h2")?.textContent !== importFolderName && Date.now() - importStartedAt < 10000) await new Promise(resolve => setTimeout(resolve, 100));
         const importedCard = [...document.querySelectorAll(".book-card")].find(card => card.textContent?.includes("imported-" + smokeToken));
-        if (!importedCard || document.querySelector(".books-section h2")?.textContent !== importFolderName) return { ok: false, folderRenamed: true, folderDeleted: true, error: "The selected Windows folder was not imported." };
+        if (!importedCard || document.querySelector(".books-section h2")?.textContent !== importFolderName || !importedCard.querySelector(".document-type-badge.textbook-structure")) return { ok: false, folderRenamed: true, folderDeleted: true, error: "The selected Windows folder was not imported with its textbook setting." };
         [...importedCard.querySelectorAll("button")].find(button => button.textContent?.trim() === "Delete")?.click();
         const importCardCleanupStartedAt = Date.now();
         while ([...document.querySelectorAll(".book-card")].some(card => card.textContent?.includes("imported-" + smokeToken)) && Date.now() - importCardCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
         document.querySelector(".delete-folder-command")?.click(); await new Promise(resolve => setTimeout(resolve, 100)); document.querySelector(".confirm-delete-folder-button")?.click();
         const importFolderCleanupStartedAt = Date.now();
         while (document.querySelector(".books-section h2")?.textContent === importFolderName && Date.now() - importFolderCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
-        return { ok: ![...document.querySelectorAll(".book-card")].some(card => card.textContent?.includes("imported-" + smokeToken)), folderCreated: true, folderRenamed: true, folderDeleted: true, folderImport: true, recursiveFolderImport: true, folderIconVisible: true, folderIconOpened: true, explorerToolbar: true, explorerAddressBar: true, explorerSearch: true, explorerLayoutToggle: true, typePicker: true, problemSetSaved: true, assignedByDrag: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: true, folderCleanedUp: true };
+        return { ok: ![...document.querySelectorAll(".book-card")].some(card => card.textContent?.includes("imported-" + smokeToken)), folderCreated: true, folderRenamed: true, folderDeleted: true, folderImport: true, recursiveFolderImport: true, folderImportTextbookOption: true, folderIconVisible: true, folderIconOpened: true, explorerToolbar: true, explorerAddressBar: true, explorerSearch: true, explorerLayoutToggle: true, treatAsTextbookOption: true, readerTextbookToggle: true, textbookStructureSaved: true, assignedByDrag: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: true, folderCleanedUp: true };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }

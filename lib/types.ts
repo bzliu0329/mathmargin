@@ -7,6 +7,8 @@ export type DocumentRecord = {
   createdAt: string;
   updatedAt: string;
   lastOpenedAt: string;
+  treatAsTextbook?: boolean;
+  /** Legacy classification retained so existing local libraries can be migrated without data loss. */
   documentType?: DocumentType;
   folderId?: string | null;
   libraryOrder?: number;
