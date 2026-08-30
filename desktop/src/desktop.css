@@ -19,27 +19,31 @@ body { -webkit-font-smoothing: antialiased; }
 .library-workspace .books-section { min-width: 0; padding: 0; }
 .library-folders { position: sticky; top: 1rem; padding: .85rem; border: 1px solid #d7ddd8; border-radius: .75rem; background: rgba(250,250,247,.88); box-shadow: 0 8px 25px rgba(44,61,54,.045); }
 .folder-heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .6rem; color: var(--ink); font-size: .72rem; font-weight: 800; }
-.new-folder-button { padding: .3rem .45rem; border: 1px solid #ccd8d1; border-radius: .38rem; background: #f2f7f3; color: var(--sage); cursor: pointer; font-size: .62rem; font-weight: 750; }
-.new-folder-button:hover, .new-folder-button:focus-visible { border-color: var(--sage); outline: none; }
-.folder-create-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .35rem; margin-bottom: .7rem; }
-.folder-create-form input, .folder-create-form button { min-width: 0; padding: .42rem .48rem; border: 1px solid #ccd5cf; border-radius: .38rem; font-size: .64rem; }
-.folder-create-form input { outline: none; background: white; color: var(--ink); }
-.folder-create-form input:focus { border-color: var(--sage); box-shadow: 0 0 0 3px rgba(52,94,81,.08); }
-.folder-create-form button { background: var(--sage); color: white; cursor: pointer; font-weight: 700; }
-.folder-create-form button:disabled { opacity: .45; cursor: default; }
 .folder-nav { display: grid; gap: .16rem; }
-.folder-nav > button, .folder-select-button { width: 100%; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: .45rem; padding: .47rem .55rem; border: 0; border-radius: .42rem; background: transparent; color: #5d6a64; cursor: pointer; font-size: .68rem; text-align: left; }
-.folder-nav > button:hover, .folder-select-button:hover { background: #eef3ef; color: var(--ink); }
-.folder-nav > button.active, .custom-folder-row.active { background: #e5eee8; color: var(--sage); }
-.folder-nav small, .folder-select-button small { flex: none; color: #89948e; font-size: .56rem; font-weight: 750; }
-.folder-list-heading { margin: .95rem .55rem .35rem; color: #8b9690; font-size: .56rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-.custom-folder-list { display: grid; gap: .16rem; }
-.custom-folder-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-radius: .42rem; }
-.folder-select-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.folder-row-actions { display: none; align-items: center; padding-right: .22rem; }
-.custom-folder-row:hover .folder-row-actions, .custom-folder-row:focus-within .folder-row-actions { display: flex; }
-.folder-row-actions button { width: 1.35rem; height: 1.35rem; display: grid; place-items: center; padding: 0; border: 0; border-radius: .3rem; background: transparent; color: #77847d; cursor: pointer; font-size: .67rem; }
-.folder-row-actions button:hover { background: white; color: #934b43; }
+.folder-nav > button { width: 100%; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: .45rem; padding: .47rem .55rem; border: 0; border-radius: .42rem; background: transparent; color: #5d6a64; cursor: pointer; font-size: .68rem; text-align: left; }
+.folder-nav > button:hover { background: #eef3ef; color: var(--ink); }
+.folder-nav > button.active { background: #e5eee8; color: var(--sage); }
+.folder-nav small { flex: none; color: #89948e; font-size: .56rem; font-weight: 750; }
+.file-manager-folders { margin: .4rem 0 1.5rem; padding-bottom: 1.35rem; border-bottom: 1px solid #d9dfda; }
+.file-manager-heading { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: .7rem; }
+.file-manager-heading h3 { margin: 0; color: var(--ink); font: 650 .82rem/1.2 var(--font-geist-sans), sans-serif; }
+.file-manager-heading span { color: #89948e; font-size: .6rem; }
+.folder-icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: .65rem; }
+.library-folder-tile { min-width: 0; min-height: 7.6rem; display: grid; justify-items: center; align-content: center; gap: .25rem; padding: .75rem .55rem; border: 1px solid #d4dbd6; border-radius: .65rem; background: #fafbf9; color: var(--ink); cursor: pointer; text-align: center; transition: border-color .15s, background .15s, box-shadow .15s, transform .15s; }
+.library-folder-tile:hover, .library-folder-tile:focus-visible { border-color: #9dac9f; outline: none; background: white; box-shadow: 0 7px 20px rgba(42,58,51,.09); transform: translateY(-2px); }
+.library-folder-tile strong { width: 100%; overflow: hidden; font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
+.library-folder-tile small { color: #849089; font-size: .56rem; }
+.windows-folder-icon { position: relative; width: 4.1rem; height: 3.05rem; display: block; margin-bottom: .25rem; }
+.windows-folder-icon::before { content: ""; position: absolute; top: .08rem; left: .2rem; width: 1.8rem; height: .75rem; border-radius: .25rem .25rem 0 0; background: #eabf55; }
+.windows-folder-icon i { position: absolute; inset: .55rem .05rem .05rem; border: 1px solid #d1a43b; border-radius: .25rem .4rem .4rem .4rem; background: linear-gradient(150deg, #f8d66e, #eab84c); box-shadow: inset 0 1px rgba(255,255,255,.5), 0 3px 7px rgba(121,91,28,.16); }
+.create-folder-tile { border-style: dashed; background: rgba(246,248,245,.7); }
+.new-folder-icon { width: 3rem; height: 3rem; display: grid; place-items: center; margin-bottom: .25rem; border: 2px dashed #9ca9a2; border-radius: .55rem; color: var(--sage); font-size: 1.45rem; font-weight: 400; }
+.folder-breadcrumb { margin: 0 0 .3rem; padding: 0; border: 0; background: transparent; color: var(--sage); cursor: pointer; font-size: .64rem; font-weight: 750; }
+.folder-breadcrumb:hover { text-decoration: underline; }
+.opened-folder-actions { display: flex; gap: .65rem; margin-top: .35rem; }
+.opened-folder-actions button { padding: 0; border: 0; background: transparent; color: #69766f; cursor: pointer; font-size: .59rem; font-weight: 700; }
+.opened-folder-actions button:hover { color: var(--sage); text-decoration: underline; }
+.opened-folder-actions .danger-action:hover { color: #a04d43; }
 .document-type-badge { width: max-content; margin-bottom: .45rem; padding: .22rem .42rem; border-radius: 999px; background: #e6efe9; color: #3f695a; font-size: .53rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .document-type-badge.problem-set { background: #f4ebd9; color: #8a642a; }
 .book-folder-field { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .45rem; margin-top: .6rem; color: #7f8a84; font-size: .59rem; }
@@ -64,6 +68,15 @@ body { -webkit-font-smoothing: antialiased; }
 .modal-actions { display: flex; justify-content: flex-end; gap: .55rem; margin-top: 1.25rem; }
 .modal-actions button { padding: .55rem .8rem; border: 1px solid #ccd5cf; border-radius: .45rem; background: white; color: #536159; cursor: pointer; font-size: .67rem; font-weight: 750; }
 .modal-actions .confirm-upload-button { border-color: var(--sage); background: var(--sage); color: white; }
+.folder-create-dialog { width: min(28rem, calc(100vw - 4rem)); }
+.modal-folder-icon { width: 3.2rem; height: 2.45rem; margin-bottom: .8rem; }
+.folder-dialog-copy { margin: .15rem 0 1.1rem; color: #748079; font-size: .68rem; line-height: 1.5; }
+.folder-create-form { display: grid; gap: .38rem; }
+.folder-create-form > label { color: #56635c; font-size: .65rem; font-weight: 750; }
+.folder-create-form > input { width: 100%; padding: .65rem .7rem; border: 1px solid #cbd4ce; border-radius: .45rem; outline: none; background: white; color: var(--ink); font-size: .74rem; }
+.folder-create-form > input:focus { border-color: var(--sage); box-shadow: 0 0 0 3px rgba(52,94,81,.09); }
+.folder-dialog-error { padding: .5rem .6rem; border-radius: .4rem; background: #fff0ed; color: #9b433b; font-size: .62rem; }
+.modal-actions .confirm-folder-button { border-color: var(--sage); background: var(--sage); color: white; }
 .modal-actions button:disabled { opacity: .5; cursor: default; }
 @media (max-width: 920px) { .library-workspace { grid-template-columns: 11rem minmax(0, 1fr); gap: 1rem; } .library-folders { padding: .65rem; } }
 .desktop-drag-region { -webkit-app-region: drag; }

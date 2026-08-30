@@ -43,21 +43,11 @@ async function runUploadSmokeTest(window) {
     const smokePdfName = "mathmargin-" + smokeToken + ".pdf";
     const smokeFolderName = "mathmargin-" + smokeToken + "-folder";
     const smokeCards = () => [...document.querySelectorAll(".book-card")].filter(card => card.textContent?.includes(smokeToken));
-    const smokeFolders = () => [...document.querySelectorAll(".custom-folder-row")].filter(row => row.textContent?.includes(smokeFolderName));
-    const staleSmokeCards = () => [...document.querySelectorAll(".book-card")].filter(card => card.textContent?.includes("mathmargin-smoke"));
-    const staleSmokeFolders = () => [...document.querySelectorAll(".custom-folder-row")].filter(row => row.textContent?.includes("mathmargin-smoke"));
+    const smokeFolderTiles = () => [...document.querySelectorAll(".library-folder-tile")].filter(tile => tile.textContent?.includes(smokeFolderName));
     window.confirm = () => true;
-    const initialCleanupStartedAt = Date.now();
-    while (staleSmokeCards().length && Date.now() - initialCleanupStartedAt < 10000) {
-      const card = staleSmokeCards()[0];
-      [...card.querySelectorAll("button")].find(button => button.textContent?.trim() === "Delete")?.click();
-      await new Promise(resolve => setTimeout(resolve, 120));
-    }
-    while (staleSmokeFolders().length && Date.now() - initialCleanupStartedAt < 10000) {
-      staleSmokeFolders()[0].querySelector('.folder-row-actions button[title="Delete folder"]')?.click();
-      await new Promise(resolve => setTimeout(resolve, 120));
-    }
-    const folderButton = document.querySelector(".new-folder-button");
+    const folderControlStartedAt = Date.now();
+    while (!document.querySelector(".create-folder-tile") && Date.now() - folderControlStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+    const folderButton = document.querySelector(".create-folder-tile");
     if (!folderButton) return { ok: false, error: "The new-folder control was not rendered." };
     folderButton.click();
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -69,8 +59,15 @@ async function runUploadSmokeTest(window) {
     await new Promise(resolve => setTimeout(resolve, 100));
     document.querySelector(".folder-create-form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     const folderStartedAt = Date.now();
-    while (!smokeFolders().length && Date.now() - folderStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
-    if (!smokeFolders().length) return { ok: false, error: "A PDF folder could not be created." };
+    while (document.querySelector(".books-section h2")?.textContent !== smokeFolderName && Date.now() - folderStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+    if (document.querySelector(".books-section h2")?.textContent !== smokeFolderName) return { ok: false, error: "A PDF folder could not be created and opened." };
+    document.querySelector(".folder-breadcrumb")?.click();
+    const folderTileStartedAt = Date.now();
+    while (!smokeFolderTiles().length && Date.now() - folderTileStartedAt < 3000) await new Promise(resolve => setTimeout(resolve, 100));
+    if (!smokeFolderTiles().length) return { ok: false, folderCreated: true, error: "The new folder did not appear as a folder icon." };
+    smokeFolderTiles()[0].click();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    if (document.querySelector(".books-section h2")?.textContent !== smokeFolderName) return { ok: false, folderCreated: true, folderIconVisible: true, error: "Clicking the folder icon did not open the folder." };
     const initialSmokeCount = smokeCards().length;
     const transfer = new DataTransfer();
     transfer.items.add(new File([bytes], smokePdfName, { type: "application/pdf" }));
@@ -368,10 +365,12 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        for (const row of smokeFolders()) row.querySelector('.folder-row-actions button[title="Delete folder"]')?.click();
+        document.querySelector(".opened-folder-actions .danger-action")?.click();
         const folderCleanupStartedAt = Date.now();
-        while (smokeFolders().length && Date.now() - folderCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
-        return { ok: smokeCards().length === 0 && smokeFolders().length === 0, folderCreated: true, typePicker: true, problemSetSaved: true, assignedToFolder: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: smokeCards().length === 0, folderCleanedUp: smokeFolders().length === 0 };
+        while (document.querySelector(".books-section h2")?.textContent === smokeFolderName && Date.now() - folderCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+        [...document.querySelectorAll(".folder-nav > button")].find(button => button.textContent?.includes("All PDFs"))?.click();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return { ok: smokeCards().length === 0 && smokeFolderTiles().length === 0, folderCreated: true, folderIconVisible: true, folderIconOpened: true, typePicker: true, problemSetSaved: true, assignedToFolder: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: smokeCards().length === 0, folderCleanedUp: smokeFolderTiles().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
