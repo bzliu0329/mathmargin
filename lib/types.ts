@@ -7,6 +7,7 @@ export type DocumentRecord = {
   createdAt: string;
   updatedAt: string;
   lastOpenedAt: string;
+  libraryOrder?: number;
   bookStructure?: BookStructureEntry[];
   bookStructureScannedAt?: string;
   bookStructureVersion?: number;
@@ -32,6 +33,7 @@ export type AnnotationRecord = {
   type: "text" | "area";
   geometry: AnnotationGeometry;
   selectedText: string | null;
+  title?: string;
   bodyMarkdown: string;
   color: AnnotationColor;
   linkedAnnotationIds?: string[];

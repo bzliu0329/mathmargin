@@ -108,6 +108,30 @@ async function runUploadSmokeTest(window) {
         editor.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true }));
         await new Promise(resolve => setTimeout(resolve, 100));
         if (editorValue() !== "$\\\\alpha$") return { ok: false, uploaded: true, rendered: true, error: "The @a shortcut produced " + JSON.stringify(editorValue()) + "." };
+        editorView.focus();
+        const selectedMath = "Now let $x \\\\in RHS$.";
+        const selectedMathFrom = selectedMath.indexOf("$");
+        const selectedMathTo = selectedMath.lastIndexOf("$") + 1;
+        editorView.dispatch({ changes: { from: 0, to: editorView.state.doc.length, insert: selectedMath }, selection: { anchor: selectedMathFrom, head: selectedMathTo }, scrollIntoView: true });
+        const selectedPreviewStartedAt = Date.now();
+        while (document.querySelector(".cm-math-edit-tooltip")?.dataset.mathSource !== "x \\\\in RHS" && Date.now() - selectedPreviewStartedAt < 3000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        const selectedPreview = document.querySelector(".cm-math-edit-tooltip");
+        if (!selectedPreview?.querySelector(".katex") || selectedPreview.dataset.mathSource !== "x \\\\in RHS" || !editorView.contentDOM.textContent?.includes("$x \\\\in RHS$")) {
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, error: "Selecting inline LaTeX did not show an Obsidian-style floating preview above its editable source." };
+        }
+        const editedMath = "Now let $A \\\\cup B$.";
+        const editedCursor = editedMath.indexOf("\\\\cup") + 2;
+        editorView.dispatch({ changes: { from: 0, to: editorView.state.doc.length, insert: editedMath }, selection: { anchor: editedCursor }, scrollIntoView: true });
+        const editedPreviewStartedAt = Date.now();
+        while (document.querySelector(".cm-math-edit-tooltip")?.dataset.mathSource !== "A \\\\cup B" && Date.now() - editedPreviewStartedAt < 3000) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        const editedPreview = document.querySelector(".cm-math-edit-tooltip");
+        if (!editedPreview?.querySelector(".katex") || editedPreview.dataset.mathSource !== "A \\\\cup B" || !editorView.contentDOM.textContent?.includes("$A \\\\cup B$")) {
+          return { ok: false, uploaded: true, rendered: true, shortcuts: true, error: "Editing inline LaTeX did not keep the source visible while updating its rendered preview." };
+        }
         setEditorValue("Before $$x^2$$ after");
         const displayMathStartedAt = Date.now();
         while (!document.querySelector(".live-note-editor .cm-live-math-display .katex-display") && Date.now() - displayMathStartedAt < 3000) {
@@ -293,7 +317,7 @@ async function runUploadSmokeTest(window) {
         while (smokeCards().length && Date.now() - cleanupStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
-        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: smokeCards().length === 0 };
+        return { ok: smokeCards().length === 0, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: smokeCards().length === 0 };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }

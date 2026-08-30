@@ -1,9 +1,9 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
-import { EditorState } from "@codemirror/state";
+import { EditorState, StateField } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { defaultHighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
-import { Decoration, EditorView, keymap, placeholder, ViewPlugin, type DecorationSet, type ViewUpdate, WidgetType } from "@codemirror/view";
+import { Decoration, EditorView, keymap, placeholder, showTooltip, ViewPlugin, type DecorationSet, type Tooltip, type ViewUpdate, WidgetType } from "@codemirror/view";
 import katex from "katex";
 import { handleLatexSuiteKey, type LatexTabState } from "./latexSuite";
 
@@ -67,21 +67,62 @@ function selectionTouches(view: EditorView, from: number, to: number) {
   return view.state.selection.ranges.some((range) => range.from <= to && range.to >= from);
 }
 
-function mathDecorationSet(view: EditorView, macros: Record<string, string>) {
-  const source = view.state.doc.toString();
-  const ranges: ReturnType<Decoration["range"]>[] = [];
-  const displayRanges: Array<{ from: number; to: number }> = [];
+function selectionEditsMath(state: EditorState, from: number, to: number) {
+  return state.selection.ranges.some((range) => range.empty ? range.from > from && range.from < to : range.from < to && range.to > from);
+}
+
+type MathRange = { from: number; to: number; source: string; display: boolean };
+
+function mathRanges(source: string) {
+  const ranges: MathRange[] = [];
+  const displayRanges: MathRange[] = [];
   for (const match of source.matchAll(/(?<!\\)\$\$([\s\S]*?)(?<!\\)\$\$/g)) {
     const from = match.index ?? 0;
-    const to = from + match[0].length;
-    displayRanges.push({ from, to });
-    if (match[1].trim() && !selectionTouches(view, from, to)) ranges.push(Decoration.replace({ widget: new MathWidget(match[1].trim(), true, macros) }).range(from, to));
+    const range = { from, to: from + match[0].length, source: match[1].trim(), display: true };
+    displayRanges.push(range); ranges.push(range);
   }
   for (const match of source.matchAll(/(?<![\\$])\$([^\n$]+?)(?<!\\)\$(?!\$)/g)) {
     const from = match.index ?? 0;
-    const to = from + match[0].length;
-    if (displayRanges.some((range) => from < range.to && to > range.from) || selectionTouches(view, from, to)) continue;
-    ranges.push(Decoration.replace({ widget: new MathWidget(match[1], false, macros) }).range(from, to));
+    const range = { from, to: from + match[0].length, source: match[1], display: false };
+    if (!displayRanges.some((display) => range.from < display.to && range.to > display.from)) ranges.push(range);
+  }
+  return ranges.sort((left, right) => left.from - right.from);
+}
+
+function activeMathRange(state: EditorState) {
+  const active = mathRanges(state.doc.toString()).filter((range) => range.source && selectionEditsMath(state, range.from, range.to));
+  const head = state.selection.main.head;
+  return active.find((range) => head > range.from && head < range.to) ?? active[0] ?? null;
+}
+
+function mathEditTooltip(range: MathRange | null, macros: Record<string, string>): Tooltip | null {
+  if (!range) return null;
+  return {
+    pos: range.from,
+    end: range.to,
+    above: true,
+    arrow: true,
+    create() {
+      const dom = document.createElement("div");
+      dom.className = "cm-math-edit-tooltip";
+      dom.dataset.mathSource = range.source;
+      dom.setAttribute("role", "tooltip");
+      dom.setAttribute("aria-label", "Rendered LaTeX preview");
+      try { katex.render(range.source, dom, { displayMode: range.display, throwOnError: true, macros }); }
+      catch (error) {
+        dom.classList.add("cm-math-edit-tooltip-error");
+        dom.textContent = "LaTeX preview unavailable";
+        dom.title = error instanceof Error ? error.message : "Invalid LaTeX";
+      }
+      return { dom, offset: { x: 0, y: 7 } };
+    },
+  };
+}
+
+function mathDecorationSet(view: EditorView, macros: Record<string, string>) {
+  const ranges: ReturnType<Decoration["range"]>[] = [];
+  for (const range of mathRanges(view.state.doc.toString())) {
+    if (range.source && !selectionEditsMath(view.state, range.from, range.to)) ranges.push(Decoration.replace({ widget: new MathWidget(range.source, range.display, macros) }).range(range.from, range.to));
   }
   return Decoration.set(ranges, true);
 }
@@ -119,8 +160,20 @@ function liveMathPlugin(macros: Record<string, string>) {
   return ViewPlugin.fromClass(class {
     decorations: DecorationSet;
     constructor(view: EditorView) { this.decorations = mathDecorationSet(view, macros); }
-    update(update: ViewUpdate) { if (update.docChanged || update.selectionSet || update.viewportChanged) this.decorations = mathDecorationSet(update.view, macros); }
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.selectionSet || update.viewportChanged || update.focusChanged) {
+        this.decorations = mathDecorationSet(update.view, macros);
+      }
+    }
   }, { decorations: (plugin) => plugin.decorations });
+}
+
+function liveMathTooltipField(macros: Record<string, string>) {
+  return StateField.define<Tooltip | null>({
+    create: (state) => mathEditTooltip(activeMathRange(state), macros),
+    update: (_value, transaction) => mathEditTooltip(activeMathRange(transaction.state), macros),
+    provide: (field) => showTooltip.from(field),
+  });
 }
 
 const calloutPlugin = ViewPlugin.fromClass(class {
@@ -182,6 +235,7 @@ export function LiveNoteEditor({ value, onChange, viewRef, macros }: LiveNoteEdi
           },
         }),
         liveMathPlugin(macros),
+        liveMathTooltipField(macros),
         calloutPlugin,
       ],
     });

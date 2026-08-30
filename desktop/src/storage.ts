@@ -42,7 +42,11 @@ export async function listDocuments() {
   const database = await openDatabase();
   const values = await requestResult(database.transaction("documents", "readonly").objectStore("documents").getAll()) as LocalDocument[];
   database.close();
-  return values.sort((a, b) => b.lastOpenedAt.localeCompare(a.lastOpenedAt));
+  return values.sort((a, b) => {
+    const aOrder = Number.isFinite(a.libraryOrder) ? a.libraryOrder! : Number.MAX_SAFE_INTEGER;
+    const bOrder = Number.isFinite(b.libraryOrder) ? b.libraryOrder! : Number.MAX_SAFE_INTEGER;
+    return aOrder - bOrder || b.lastOpenedAt.localeCompare(a.lastOpenedAt);
+  });
 }
 
 export async function getDocument(id: string) {

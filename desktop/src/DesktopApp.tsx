@@ -20,6 +20,7 @@ const KATEX_MACROS = {
 };
 
 const NOTES_WIDTH_KEY = "mathmargin:notes-width";
+const OPEN_BOOKS_KEY = "mathmargin:open-books";
 const AREA_RESIZE_HANDLES = ["nw", "ne", "sw", "se"] as const;
 type AreaResizeHandle = typeof AREA_RESIZE_HANDLES[number];
 
@@ -43,7 +44,7 @@ function moveAreaRect(rect: NormalizedRect, deltaX: number, deltaY: number) {
   return { ...rect, x: clamp(rect.x + deltaX, 0, 1 - rect.width), y: clamp(rect.y + deltaY, 0, 1 - rect.height) };
 }
 function annotationDescription(annotation: AnnotationRecord) {
-  const content = annotation.bodyMarkdown.trim() || annotation.selectedText?.trim();
+  const content = annotation.title?.trim() || annotation.bodyMarkdown.trim() || annotation.selectedText?.trim();
   return content ? content.replace(/\s+/g, " ").slice(0, 90) : `${annotation.type === "area" ? "Area" : "Highlight"} annotation`;
 }
 function mathError(markdown: string) {
@@ -112,14 +113,76 @@ function groupAnnotationsByStructure(annotations: AnnotationRecord[], structure:
 
 export function DesktopApp() {
   const [activeId, setActiveId] = useState(() => location.hash.match(/^#\/reader\/(.+)$/)?.[1] ?? "");
+  const [openBooks, setOpenBooks] = useState<{ id: string; title: string }[]>([]);
+  const [tabsHydrated, setTabsHydrated] = useState(false);
+  const [initialActiveId] = useState(activeId);
   useEffect(() => {
     const change = () => setActiveId(location.hash.match(/^#\/reader\/(.+)$/)?.[1] ?? "");
     addEventListener("hashchange", change); return () => removeEventListener("hashchange", change);
   }, []);
-  return activeId ? <DesktopReader documentId={activeId} onBack={() => { location.hash = ""; }} /> : <DesktopLibrary onOpen={(id) => { location.hash = `/reader/${id}`; }} />;
+  useEffect(() => {
+    const storedIds = (() => {
+      try { return JSON.parse(sessionStorage.getItem(OPEN_BOOKS_KEY) ?? "[]") as string[]; }
+      catch { return []; }
+    })();
+    listDocuments().then((documents) => {
+      const requestedIds = [...new Set([...storedIds, ...(initialActiveId ? [initialActiveId] : [])])];
+      const documentsById = new Map(documents.map((document) => [document.id, document]));
+      setOpenBooks(requestedIds.flatMap((id) => {
+        const document = documentsById.get(id);
+        return document ? [{ id, title: document.title }] : [];
+      }));
+    }).catch(() => undefined).finally(() => setTabsHydrated(true));
+  }, [initialActiveId]);
+  useEffect(() => {
+    if (!activeId || openBooks.some((book) => book.id === activeId)) return;
+    getDocument(activeId).then((document) => {
+      if (document) setOpenBooks((current) => current.some((book) => book.id === document.id) ? current : [...current, { id: document.id, title: document.title }]);
+      else location.hash = "";
+    }).catch(() => undefined);
+  }, [activeId, openBooks]);
+  useEffect(() => { if (tabsHydrated) sessionStorage.setItem(OPEN_BOOKS_KEY, JSON.stringify(openBooks.map((book) => book.id))); }, [openBooks, tabsHydrated]);
+
+  function openBook(document: Pick<LocalDocument, "id" | "title">) {
+    setOpenBooks((current) => current.some((book) => book.id === document.id) ? current : [...current, { id: document.id, title: document.title }]);
+    location.hash = `/reader/${document.id}`;
+  }
+  function closeBook(id: string) {
+    setOpenBooks((current) => {
+      const index = current.findIndex((book) => book.id === id);
+      const next = current.filter((book) => book.id !== id);
+      if (activeId === id) {
+        const replacement = next[Math.min(index, next.length - 1)];
+        location.hash = replacement ? `/reader/${replacement.id}` : "";
+      }
+      return next;
+    });
+  }
+  function updateBookTitle(id: string, title: string) { setOpenBooks((current) => current.map((book) => book.id === id ? { ...book, title } : book)); }
+  function removeBook(id: string) { closeBook(id); }
+
+  return <div className="desktop-app-shell">
+    <nav className="book-tabs desktop-drag-region" aria-label="Open textbooks">
+      <button type="button" className={`library-tab ${!activeId ? "active" : ""}`} onClick={() => { location.hash = ""; }} aria-label="Open library" title="Library"><span className="brand-mark">M</span><span>Library</span></button>
+      <div className="book-tab-list">{openBooks.map((book) => <div className={`book-tab ${activeId === book.id ? "active" : ""}`} key={book.id}><button type="button" className="book-tab-title" onClick={() => { location.hash = `/reader/${book.id}`; }} title={book.title}>{book.title}</button><button type="button" className="book-tab-close" onClick={() => closeBook(book.id)} aria-label={`Close ${book.title}`} title="Close tab">×</button></div>)}</div>
+    </nav>
+    <div className="desktop-view-stack">
+      <div className={`desktop-view ${activeId ? "is-hidden" : ""}`}><DesktopLibrary onOpen={openBook} onRename={updateBookTitle} onDelete={removeBook} /></div>
+      {openBooks.map((book) => <div className={`desktop-view ${activeId === book.id ? "" : "is-hidden"}`} key={book.id}><DesktopReader documentId={book.id} isActive={activeId === book.id} onBack={() => { location.hash = ""; }} /></div>)}
+    </div>
+  </div>;
 }
 
-function DesktopLibrary({ onOpen }: { onOpen: (id: string) => void }) {
+function BookCover({ document, onOpen }: { document: LocalDocument; onOpen: () => void }) {
+  const fileUrl = useMemo(() => URL.createObjectURL(document.file instanceof Blob ? document.file : new Blob([document.file], { type: "application/pdf" })), [document.file]);
+  useEffect(() => () => URL.revokeObjectURL(fileUrl), [fileUrl]);
+  return <button className="book-cover pdf-book-cover" onClick={onOpen} aria-label={`Open ${document.title}`}>
+    <Document file={fileUrl} loading={<span className="cover-loading"><span className="spinner" /> Loading cover…</span>} error={<span className="cover-loading">Cover unavailable</span>}><Page pageNumber={1} height={190} renderAnnotationLayer={false} renderTextLayer={false} /></Document>
+    <span className="cover-pages">{document.pageCount} pages</span>
+  </button>;
+}
+
+function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: LocalDocument) => void; onRename: (id: string, title: string) => void; onDelete: (id: string) => void }) {
   const [documents, setDocuments] = useState<LocalDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -127,6 +190,8 @@ function DesktopLibrary({ onOpen }: { onOpen: (id: string) => void }) {
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
+  const [draggedId, setDraggedId] = useState("");
+  const [dropTargetId, setDropTargetId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { listDocuments().then(setDocuments).catch((cause) => setError(message(cause, "Your library could not be opened."))).finally(() => setLoading(false)); }, []);
@@ -146,14 +211,15 @@ function DesktopLibrary({ onOpen }: { onOpen: (id: string) => void }) {
       const now = new Date().toISOString();
       const record: LocalDocument = {
         id: crypto.randomUUID(), title: file.name.replace(/\.pdf$/i, ""), originalFilename: file.name,
-        fileSize: file.size, pageCount: pdf.numPages, createdAt: now, updatedAt: now, lastOpenedAt: now,
+        fileSize: file.size, pageCount: pdf.numPages, createdAt: now, updatedAt: now, lastOpenedAt: now, libraryOrder: 0,
         file: data,
       };
       stage = "closing the PDF validator";
       await pdf.destroy();
       stage = "saving the PDF locally";
-      await putDocument(record);
-      setDocuments((current) => [record, ...current]);
+      const reordered = [record, ...documents].map((document, index) => ({ ...document, libraryOrder: index }));
+      await Promise.all(reordered.map(putDocument));
+      setDocuments(reordered);
     } catch (cause) {
       const detail = message(cause, "This PDF could not be read.");
       setError(/password/i.test(detail) ? "Password-protected PDFs are not supported yet." : /invalid|format|missing pdf/i.test(detail) ? "This PDF appears to be corrupted or invalid." : `${detail} (${stage})`);
@@ -163,12 +229,36 @@ function DesktopLibrary({ onOpen }: { onOpen: (id: string) => void }) {
   async function rename(document: LocalDocument) {
     const title = draftTitle.trim(); if (!title) return;
     const updated = { ...document, title: title.slice(0, 160), updatedAt: new Date().toISOString() };
-    await putDocument(updated); setDocuments((current) => current.map((item) => item.id === document.id ? updated : item)); setEditingId("");
+    await putDocument(updated); setDocuments((current) => current.map((item) => item.id === document.id ? updated : item)); onRename(document.id, updated.title); setEditingId("");
   }
 
   async function discard(document: LocalDocument) {
     if (!confirm(`Delete “${document.title}” and all of its annotations?`)) return;
-    await removeDocument(document.id); setDocuments((current) => current.filter((item) => item.id !== document.id));
+    await removeDocument(document.id); setDocuments((current) => current.filter((item) => item.id !== document.id)); onDelete(document.id);
+  }
+
+  async function commitOrder(next: LocalDocument[]) {
+    const ordered = next.map((document, index) => ({ ...document, libraryOrder: index, updatedAt: new Date().toISOString() }));
+    setDocuments(ordered);
+    try { await Promise.all(ordered.map(putDocument)); }
+    catch (cause) { setError(message(cause, "The new book order could not be saved.")); }
+  }
+  function moveBook(id: string, targetId: string) {
+    if (!id || id === targetId) return;
+    const from = documents.findIndex((document) => document.id === id);
+    const to = documents.findIndex((document) => document.id === targetId);
+    if (from < 0 || to < 0) return;
+    const next = [...documents];
+    const [moved] = next.splice(from, 1); next.splice(to, 0, moved);
+    void commitOrder(next);
+  }
+  function moveBookBy(id: string, delta: number) {
+    const from = documents.findIndex((document) => document.id === id);
+    const to = clamp(from + delta, 0, documents.length - 1);
+    if (from < 0 || from === to) return;
+    const next = [...documents];
+    const [moved] = next.splice(from, 1); next.splice(to, 0, moved);
+    void commitOrder(next);
   }
 
   return <main className="library-shell desktop-library">
@@ -181,15 +271,15 @@ function DesktopLibrary({ onOpen }: { onOpen: (id: string) => void }) {
     </div></section>
     <section className="books-section"><div className="section-heading"><div><p className="eyebrow">Local library</p><h2>Your textbooks</h2></div><span className="book-count">{documents.length} {documents.length === 1 ? "book" : "books"}</span></div>
       {loading ? <div className="loading-row"><span className="spinner" /> Opening your library…</div> : !documents.length ? <div className="empty-library"><div className="empty-glyph">∫</div><div><h3>Your library is ready</h3><p>Upload your first textbook to begin making mathematical notes.</p></div><button className="text-button" onClick={() => inputRef.current?.click()}>Choose PDF</button></div> :
-        <div className="book-grid">{documents.map((document, index) => <article className="book-card" key={document.id}>
-          <button className={`book-cover cover-${index % 4}`} onClick={() => onOpen(document.id)}><span className="cover-symbol">{index % 3 === 0 ? "∫" : index % 3 === 1 ? "Σ" : "π"}</span><span className="cover-pages">{document.pageCount} pages</span></button>
-          <div className="book-info">{editingId === document.id ? <form className="rename-form" onSubmit={(event) => { event.preventDefault(); rename(document); }}><input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} autoFocus /><button>Save</button><button type="button" onClick={() => setEditingId("")}>Cancel</button></form> : <button className="desktop-book-title" onClick={() => onOpen(document.id)}><h3>{document.title}</h3></button>}<p>{formatSize(document.fileSize)} · {document.pageCount} pages</p><div className="book-actions"><button className="open-button" onClick={() => onOpen(document.id)}>Open textbook <span>→</span></button><button onClick={() => { setEditingId(document.id); setDraftTitle(document.title); }}>Rename</button><button className="danger-action" onClick={() => discard(document)}>Delete</button></div></div>
+        <div className="book-grid">{documents.map((document, index) => <article className={`book-card ${draggedId === document.id ? "is-dragging" : ""} ${dropTargetId === document.id ? "is-drop-target" : ""}`} key={document.id} draggable={editingId !== document.id} onDragStart={(event) => { setDraggedId(document.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", document.id); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropTargetId(document.id); }} onDragLeave={() => setDropTargetId((current) => current === document.id ? "" : current)} onDrop={(event) => { event.preventDefault(); moveBook(event.dataTransfer.getData("text/plain") || draggedId, document.id); setDraggedId(""); setDropTargetId(""); }} onDragEnd={() => { setDraggedId(""); setDropTargetId(""); }}>
+          <BookCover document={document} onOpen={() => onOpen(document)} />
+          <div className="book-info">{editingId === document.id ? <form className="rename-form" onSubmit={(event) => { event.preventDefault(); rename(document); }}><input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} autoFocus /><button>Save</button><button type="button" onClick={() => setEditingId("")}>Cancel</button></form> : <button className="desktop-book-title" onClick={() => onOpen(document)}><h3>{document.title}</h3></button>}<p>{formatSize(document.fileSize)} · {document.pageCount} pages</p><div className="book-position-actions" aria-label={`Move ${document.title}`}><span>Drag to reorder</span><button type="button" onClick={() => moveBookBy(document.id, -1)} disabled={index === 0} aria-label={`Move ${document.title} earlier`}>←</button><button type="button" onClick={() => moveBookBy(document.id, 1)} disabled={index === documents.length - 1} aria-label={`Move ${document.title} later`}>→</button></div><div className="book-actions"><button className="open-button" onClick={() => onOpen(document)}>Open textbook <span>→</span></button><button onClick={() => { setEditingId(document.id); setDraftTitle(document.title); }}>Rename</button><button className="danger-action" onClick={() => discard(document)}>Delete</button></div></div>
         </article>)}</div>}
     </section>
   </main>;
 }
 
-function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () => void }) {
+function DesktopReader({ documentId, isActive, onBack }: { documentId: string; isActive: boolean; onBack: () => void }) {
   const [document, setDocument] = useState<LocalDocument | null>(null);
   const [annotations, setAnnotations] = useState<AnnotationRecord[]>([]);
   const [pageNumber, setPageNumber] = useState(1);
@@ -243,6 +333,19 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
       if (opened.bookStructureScannedAt && opened.bookStructureVersion === BOOK_STRUCTURE_VERSION) setStructureState(opened.bookStructure?.length ? "ready" : "empty");
     }).catch((cause) => setError(message(cause, "This textbook could not be opened."))).finally(() => setLoading(false));
   }, [documentId]);
+  useEffect(() => {
+    if (!isActive) return;
+    const pendingAnnotationId = sessionStorage.getItem("mathmargin:open-annotation");
+    const pendingAnnotation = annotations.find((annotation) => annotation.id === pendingAnnotationId);
+    if (!pendingAnnotation) return;
+    sessionStorage.removeItem("mathmargin:open-annotation");
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return;
+      setSelectedId(pendingAnnotation.id); setPageNumber(pendingAnnotation.pageNumber); setSidebarOpen(true);
+    });
+    return () => { cancelled = true; };
+  }, [annotations, isActive]);
   useEffect(() => {
     if (!selectedId) return;
     let cancelled = false;
@@ -561,11 +664,12 @@ function DesktopReader({ documentId, onBack }: { documentId: string; onBack: () 
       {tool === "area" && <div className="area-interaction" onPointerDown={beginArea} onPointerMove={moveArea} onPointerUp={endArea}>{draftArea && <div className="draft-area" style={{ left: `${draftArea.x * 100}%`, top: `${draftArea.y * 100}%`, width: `${draftArea.width * 100}%`, height: `${draftArea.height * 100}%` }}>{draftArea.width >= .015 && draftArea.height >= .015 && <div className="draft-actions"><button onClick={() => { create("area", draftArea); setDraftArea(null); }}>Annotate area</button><button onClick={() => setDraftArea(null)}>Cancel</button></div>}</div>}</div>}
     </div></Document>{error && <div className="reader-toast"><span>!</span>{error}<button onClick={() => setError("")}>×</button></div>}</section>
       <aside className="notes-panel">{sidebarOpen && <div className="notes-resizer" role="separator" aria-label="Resize annotation panel" aria-orientation="vertical" aria-valuemin={Math.min(320, sidebarMaximum)} aria-valuemax={sidebarMaximum} aria-valuenow={Math.round(sidebarWidth)} tabIndex={0} title="Drag to resize annotations" onPointerDown={beginSidebarResize} onPointerMove={moveSidebarResize} onPointerUp={endSidebarResize} onPointerCancel={endSidebarResize} onKeyDown={resizeSidebarWithKeyboard} />}<div className="notes-header"><div><p className="eyebrow">Local notebook</p><h2>Annotations</h2></div><button onClick={() => setSidebarOpen(false)}>×</button></div>{selected ? <div className="note-editor"><button className="back-to-notes" onClick={() => setSelectedId("")}>← All annotations</button><div className="note-meta"><span>{selected.type === "text" ? "Highlighted text" : "Selected area"}</span><button onClick={() => setPageNumber(selected.pageNumber)}>Page {selected.pageNumber}</button></div>{selected.selectedText && <blockquote>“{selected.selectedText}”</blockquote>}<div className="color-row"><span>Marker</span>{ANNOTATION_COLORS.map((color) => <button key={color} className={`color-dot ${color} ${selected.color === color ? "active" : ""}`} onClick={() => update(selected.id, { color: color as AnnotationColor })} />)}</div>
+        <label className="annotation-name-label" htmlFor={`annotation-name-${selected.id}`}>Annotation name</label><input id={`annotation-name-${selected.id}`} className="annotation-name-input" value={selected.title ?? ""} onChange={(event) => update(selected.id, { title: event.target.value.slice(0, 120) })} placeholder={`Page ${selected.pageNumber} ${selected.type === "text" ? "highlight" : "area"}`} />
         <section className="annotation-links" aria-label="Linked annotations"><div className="annotation-links-heading"><div><strong>Linked annotations</strong><span>{linkedAnnotations.length || "None yet"}</span></div><button type="button" onClick={() => setLinkPickerOpen((open) => !open)}>{linkPickerOpen ? "Close" : "+ Link"}</button></div>
           {linkedAnnotations.length > 0 && <div className="annotation-linked-list">{linkedAnnotations.map((annotation) => <div className="annotation-linked-item" key={annotation.id}><button type="button" onClick={() => openLinkedAnnotation(annotation)}><span>{documentTitles.get(annotation.documentId) ?? (annotation.documentId === documentId ? document.title : "Another textbook")}</span><strong>{annotationDescription(annotation)}</strong><small>Page {annotation.pageNumber} · {annotation.type}</small></button><button type="button" className="unlink-annotation" aria-label={`Unlink ${annotationDescription(annotation)}`} title="Unlink annotation" onClick={() => unlinkAnnotations(annotation.id)}>×</button></div>)}</div>}
           {linkPickerOpen && <div className="annotation-link-picker"><label htmlFor="annotation-link-search">Link another note</label><input id="annotation-link-search" value={linkSearch} onChange={(event) => setLinkSearch(event.target.value)} placeholder="Search every textbook…" />{linkLibraryState === "loading" ? <div className="link-picker-status"><span className="spinner" /> Loading annotations…</div> : linkLibraryState === "error" ? <div className="link-picker-status error">Annotations could not be loaded.</div> : <div className="link-candidate-list">{linkCandidates.map((annotation) => { const linked = selected.linkedAnnotationIds?.includes(annotation.id); return <button type="button" key={annotation.id} data-document-id={annotation.documentId} data-annotation-type={annotation.type} className={linked ? "linked" : ""} onClick={() => linked ? unlinkAnnotations(annotation.id) : linkAnnotations(annotation)}><span>{documentTitles.get(annotation.documentId) ?? "Unknown textbook"}</span><strong>{annotationDescription(annotation)}</strong><small>Page {annotation.pageNumber} · {annotation.type}<b>{linked ? "Unlink" : "Link"}</b></small></button>; })}{!linkCandidates.length && linkLibraryState === "ready" && <div className="link-picker-status">No matching annotations.</div>}</div>}</div>}
         </section>
-        <label className="editor-label">Your note <span>Obsidian-style live editing</span></label><div className="note-input-tools"><div className="latex-suite-status" title="Your active Obsidian LaTeX Suite snippet set is enabled. Automatic snippets expand as you type; press Tab for manual snippets and placeholder navigation."><span>⌨</span> LaTeX Suite · {LATEX_SUITE_SHORTCUT_COUNT} shortcuts · Tab to expand</div><button type="button" className="insert-callout-button" onClick={insertCallout} title="Insert an Obsidian-style note callout">＋ Callout</button></div><LiveNoteEditor key={selected.id} value={selected.bodyMarkdown} onChange={editNote} viewRef={liveEditorViewRef} macros={KATEX_MACROS} />{latexError && <div className="latex-error"><strong>LaTeX needs attention</strong>{latexError}</div>}<div className="editor-footer"><span>{selected.bodyMarkdown.length.toLocaleString()} characters</span><button className="delete-note" onClick={() => discard(selected.id)}>Delete annotation</button></div></div> : <div className="notes-list">{structureState === "scanning" && <div className="structure-status"><span className="spinner" /> Reading chapters and sections{structureProgress ? ` · ${structureProgress}%` : "…"}</div>}{structureState === "error" && <div className="structure-status warning">Chapter detection could not finish. Notes are still grouped by page.</div>}{structureState === "empty" && <div className="structure-status">No chapter headings were found in this PDF.</div>}{annotationGroups.length ? annotationGroups.map((chapter) => <section className="annotation-chapter" key={chapter.key}><button type="button" className="annotation-chapter-heading" data-page-number={chapter.pageNumber} onClick={() => setPageNumber(chapter.pageNumber)} title={`Go to page ${chapter.pageNumber}`}><strong>{chapter.number ? `Chapter ${chapter.number} · ` : ""}{structureTitle(chapter.title, chapter.number, 0)}</strong><span>{chapter.sections.reduce((total, section) => total + section.annotations.length, 0)}</span></button>{chapter.sections.map((section) => <div className="annotation-section" key={section.key}><button type="button" className="annotation-section-heading" data-page-number={section.pageNumber} onClick={() => setPageNumber(section.pageNumber)} title={`Go to page ${section.pageNumber}`}><span>{section.number ? `Section ${section.number} · ` : ""}{structureTitle(section.title, section.number, 1)}</span><small>{section.annotations.length} {section.annotations.length === 1 ? "note" : "notes"}</small></button>{section.annotations.map((annotation) => <button className="note-card" key={annotation.id} onClick={() => { setSelectedId(annotation.id); setPageNumber(annotation.pageNumber); }}><span className={`note-stripe ${annotation.color}`} /><span className="note-card-copy"><span className="note-card-meta">Page {annotation.pageNumber} · {annotation.type}</span><strong>{annotation.bodyMarkdown || annotation.selectedText || "Untitled annotation"}</strong></span><span>→</span></button>)}{!section.annotations.length && <div className="empty-section-notes">No notes in this section</div>}</div>)}{!chapter.sections.length && <div className="empty-section-notes chapter-empty">No sections or notes yet</div>}</section>) : <div className="notes-empty"><div>∴</div><h3>No annotations yet</h3><p>Select text or draw an area on the page. Your note will open here.</p></div>}</div>}</aside>
+        <label className="editor-label">Your note <span>Obsidian-style live editing</span></label><div className="note-input-tools"><div className="latex-suite-status" title="Your active Obsidian LaTeX Suite snippet set is enabled. Automatic snippets expand as you type; press Tab for manual snippets and placeholder navigation."><span>⌨</span> LaTeX Suite · {LATEX_SUITE_SHORTCUT_COUNT} shortcuts · Tab to expand</div><button type="button" className="insert-callout-button" onClick={insertCallout} title="Insert an Obsidian-style note callout">＋ Callout</button></div><LiveNoteEditor key={selected.id} value={selected.bodyMarkdown} onChange={editNote} viewRef={liveEditorViewRef} macros={KATEX_MACROS} />{latexError && <div className="latex-error"><strong>LaTeX needs attention</strong>{latexError}</div>}<div className="editor-footer"><span>{selected.bodyMarkdown.length.toLocaleString()} characters</span><button className="delete-note" onClick={() => discard(selected.id)}>Delete annotation</button></div></div> : <div className="notes-list">{structureState === "scanning" && <div className="structure-status"><span className="spinner" /> Reading chapters and sections{structureProgress ? ` · ${structureProgress}%` : "…"}</div>}{structureState === "error" && <div className="structure-status warning">Chapter detection could not finish. Notes are still grouped by page.</div>}{structureState === "empty" && <div className="structure-status">No chapter headings were found in this PDF.</div>}{annotationGroups.length ? annotationGroups.map((chapter) => <section className="annotation-chapter" key={chapter.key}><button type="button" className="annotation-chapter-heading" data-page-number={chapter.pageNumber} onClick={() => setPageNumber(chapter.pageNumber)} title={`Go to page ${chapter.pageNumber}`}><strong>{chapter.number ? `Chapter ${chapter.number} · ` : ""}{structureTitle(chapter.title, chapter.number, 0)}</strong><span>{chapter.sections.reduce((total, section) => total + section.annotations.length, 0)}</span></button>{chapter.sections.map((section) => <div className="annotation-section" key={section.key}><button type="button" className="annotation-section-heading" data-page-number={section.pageNumber} onClick={() => setPageNumber(section.pageNumber)} title={`Go to page ${section.pageNumber}`}><span>{section.number ? `Section ${section.number} · ` : ""}{structureTitle(section.title, section.number, 1)}</span><small>{section.annotations.length} {section.annotations.length === 1 ? "note" : "notes"}</small></button>{section.annotations.map((annotation) => <button className="note-card" key={annotation.id} onClick={() => { setSelectedId(annotation.id); setPageNumber(annotation.pageNumber); }}><span className={`note-stripe ${annotation.color}`} /><span className="note-card-copy"><span className="note-card-meta">Page {annotation.pageNumber} · {annotation.type}</span><strong>{annotation.title?.trim() || annotation.bodyMarkdown || annotation.selectedText || "Untitled annotation"}</strong></span><span>→</span></button>)}{!section.annotations.length && <div className="empty-section-notes">No notes in this section</div>}</div>)}{!chapter.sections.length && <div className="empty-section-notes chapter-empty">No sections or notes yet</div>}</section>) : <div className="notes-empty"><div>∴</div><h3>No annotations yet</h3><p>Select text or draw an area on the page. Your note will open here.</p></div>}</div>}</aside>
     </div>
   </main>;
 }
