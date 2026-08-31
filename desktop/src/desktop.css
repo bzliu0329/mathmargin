@@ -45,6 +45,7 @@ body { -webkit-font-smoothing: antialiased; }
 .explorer-address { min-width: 0; height: 2rem; display: flex; align-items: center; gap: .45rem; padding: 0 .65rem; overflow: hidden; border: 1px solid #cdd4d0; border-radius: .3rem; color: #6f7b74; font-size: .64rem; }
 .explorer-address button { padding: 0; border: 0; background: transparent; color: var(--sage); cursor: pointer; font-size: inherit; }
 .explorer-address strong { overflow: hidden; color: #37433d; text-overflow: ellipsis; white-space: nowrap; }
+.explorer-breadcrumb-segment { min-width: 0; display: inline-flex; flex: none; align-items: center; gap: .45rem; white-space: nowrap; }
 .explorer-search { height: 2rem; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .35rem; padding: 0 .55rem; border: 1px solid #cdd4d0; border-radius: .3rem; background: white; color: #718078; }
 .explorer-search input { min-width: 0; border: 0; outline: none; background: transparent; color: var(--ink); font-size: .64rem; }
 .explorer-error { margin: .55rem 1rem 0; }
@@ -62,6 +63,7 @@ body { -webkit-font-smoothing: antialiased; }
 .folder-nav small { flex: none; color: #89948e; font-size: .56rem; font-weight: 750; }
 .folder-list-heading { margin: 1rem .5rem .4rem; color: #77837c; font-size: .55rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .explorer-folder-tree { display: grid; gap: .12rem; }
+.folder-tree-branch { min-width: 0; display: grid; gap: .12rem; }
 .explorer-folder-tree button { min-width: 0; width: 100%; display: grid; grid-template-columns: 1rem minmax(0, 1fr) auto; align-items: center; gap: .4rem; padding: .42rem .5rem; border: 0; border-radius: .35rem; background: transparent; color: #526058; cursor: pointer; text-align: left; }
 .explorer-folder-tree button:hover, .explorer-folder-tree button.active { background: #e3e8e5; }
 .explorer-folder-tree button.active { color: var(--sage); }

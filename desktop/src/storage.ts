@@ -42,10 +42,21 @@ export async function putFolder(folder: LibraryFolder) {
 export async function removeFolder(id: string) {
   const database = await openDatabase();
   const transaction = database.transaction(["folders", "documents", "annotations"], "readwrite");
-  transaction.objectStore("folders").delete(id);
+  const folderStore = transaction.objectStore("folders");
+  const folders = await requestResult(folderStore.getAll()) as LibraryFolder[];
+  const removedFolderIds = new Set([id]);
+  let foundDescendant = true;
+  while (foundDescendant) {
+    foundDescendant = false;
+    for (const folder of folders) {
+      if (removedFolderIds.has(folder.id) || !folder.parentFolderId || !removedFolderIds.has(folder.parentFolderId)) continue;
+      removedFolderIds.add(folder.id); foundDescendant = true;
+    }
+  }
+  for (const folderId of removedFolderIds) folderStore.delete(folderId);
   const documentStore = transaction.objectStore("documents");
   const documents = await requestResult(documentStore.getAll()) as LocalDocument[];
-  const removedDocumentIds = new Set(documents.filter((document) => document.folderId === id).map((document) => document.id));
+  const removedDocumentIds = new Set(documents.filter((document) => document.folderId && removedFolderIds.has(document.folderId)).map((document) => document.id));
   for (const documentId of removedDocumentIds) documentStore.delete(documentId);
   const annotationStore = transaction.objectStore("annotations");
   const annotations = await requestResult(annotationStore.getAll()) as AnnotationRecord[];

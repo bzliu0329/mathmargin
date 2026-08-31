@@ -57,10 +57,12 @@ test("keeps desktop PDF folders and optional textbook treatment persistent", asy
   ]);
   assert.match(types, /treatAsTextbook\?: boolean/);
   assert.match(types, /folderId\?: string \| null/);
+  assert.match(types, /parentFolderId\?: string \| null/);
   assert.match(storage, /createObjectStore\("folders"/);
   assert.match(storage, /export async function removeFolder/);
   assert.match(storage, /removedDocumentIds/);
   assert.match(storage, /removedAnnotationIds/);
+  assert.match(storage, /removedFolderIds/);
   assert.match(desktop, /Treat as textbook/);
   assert.match(desktop, /Automatically detect chapters and sections/);
   assert.match(desktop, /!treatsDocumentAsTextbook/);
@@ -75,6 +77,11 @@ test("keeps desktop PDF folders and optional textbook treatment persistent", asy
   assert.match(desktop, /dropDocumentIntoFolder/);
   assert.match(desktop, /Import folder/);
   assert.match(desktop, /webkitdirectory/);
+  assert.match(desktop, /relativeDirectoryPaths/);
+  assert.match(desktop, /folderByRelativePath/);
+  assert.match(desktop, /folderSubtreeIds/);
+  assert.match(desktop, /folderLineage/);
+  assert.match(desktop, /original subfolder hierarchy will be preserved/i);
   assert.match(desktop, /folder-rename-dialog/);
   assert.match(desktop, /folder-delete-dialog/);
   assert.match(desktop, /folder-import-dialog/);

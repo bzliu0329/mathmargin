@@ -22,6 +22,7 @@ export type DocumentType = "textbook" | "problem-set";
 export type LibraryFolder = {
   id: string;
   name: string;
+  parentFolderId?: string | null;
   createdAt: string;
   updatedAt: string;
   libraryOrder?: number;
