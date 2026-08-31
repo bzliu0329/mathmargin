@@ -85,7 +85,9 @@ test("keeps desktop PDF folders and optional textbook treatment persistent", asy
   assert.match(desktop, /folder-rename-dialog/);
   assert.match(desktop, /folder-delete-dialog/);
   assert.match(desktop, /folder-import-dialog/);
-  assert.match(desktop, /They will no longer appear in All PDFs/);
+  assert.match(desktop, /useState\("unfiled"\)/);
+  assert.doesNotMatch(desktop, /▣ All PDFs/);
+  assert.match(desktop, /All of them will be removed from your library/);
   assert.match(desktop, /selectedDocumentIds/);
   assert.match(desktop, /Ctrl\+click, Shift\+click/);
   assert.match(desktop, /application\/x-mathmargin-document-ids/);
