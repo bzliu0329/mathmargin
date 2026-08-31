@@ -5,7 +5,7 @@ MathMargin is a local-first PDF reader for mathematical notes, books, papers, an
 ## Features
 
 - Local PDF library with upload (up to 120 MB), real first-page covers, drag-to-reorder, rename, reopen, and delete
-- Windows-style Ctrl/Shift multi-selection with bulk open, move, textbook-mode, and delete actions
+- Windows-style Ctrl/Shift multi-selection with a visible destination picker for moving one or many PDFs, plus bulk open, textbook-mode, and delete actions
 - Folder import that preserves the original Windows subfolder hierarchy, with nested Explorer navigation
 - Recursive folder deletion that also removes every nested folder, contained PDF, and annotation
 - Multi-PDF tabs that keep each document's reading state while switching

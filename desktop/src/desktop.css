@@ -26,10 +26,7 @@ body { -webkit-font-smoothing: antialiased; }
 .explorer-command-bar .import-folder-command > span { font-size: .85rem; }
 .explorer-command-bar .rename-folder-command { border-color: #cad7d0; color: #35604f; }
 .explorer-command-bar .delete-folder-command { border-color: #e3c7c3; color: #99493f; }
-.bulk-move-control { height: 2rem; display: inline-flex; align-items: center; gap: .35rem; padding: 0 .35rem 0 .6rem; border: 1px solid transparent; border-radius: .38rem; color: #6c7771; font-size: .6rem; font-weight: 700; }
-.bulk-move-control.enabled { border-color: #d1d8d4; background: white; color: #425149; }
-.bulk-move-control select { max-width: 8rem; border: 0; outline: none; background: transparent; color: inherit; cursor: pointer; font-size: .61rem; }
-.bulk-move-control select:disabled { cursor: default; }
+.explorer-command-bar .move-to-folder-command:not(:disabled) { border-color: #c9d7cf; background: white; color: #35604f; }
 .explorer-command-bar .textbook-treatment-command { border-color: #d2d8d4; }
 .explorer-command-bar .textbook-treatment-command.active { border-color: #9bb5a7; background: #e6f1ea; color: #37634f; }
 .command-folder-glyph, .tree-folder-glyph { position: relative; width: .95rem; height: .7rem; display: inline-block; border-radius: .1rem; background: #e9ba48; }
@@ -107,6 +104,9 @@ body { -webkit-font-smoothing: antialiased; }
 .book-folder-field { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .45rem; margin-top: .6rem; color: #7f8a84; font-size: .59rem; }
 .book-folder-field select, .upload-folder-field select { min-width: 0; padding: .36rem 1.55rem .36rem .45rem; border: 1px solid #d3dad5; border-radius: .38rem; outline: none; background: white; color: #4f5d56; font-size: .62rem; }
 .book-folder-field select:focus, .upload-folder-field select:focus { border-color: var(--sage); box-shadow: 0 0 0 3px rgba(52,94,81,.08); }
+.move-destination-field { display: grid; gap: .4rem; margin: 1.1rem 0 .25rem; color: #59675f; font-size: .66rem; font-weight: 750; }
+.move-destination-field select { width: 100%; padding: .7rem .75rem; border: 1px solid #cbd5cf; border-radius: .45rem; outline: none; background: white; color: #34433b; font-size: .7rem; }
+.move-destination-field select:focus { border-color: var(--sage); box-shadow: 0 0 0 3px rgba(52,94,81,.1); }
 .filtered-empty { min-height: 12rem; }
 .library-modal-backdrop { position: fixed; z-index: 200; inset: 0; display: grid; place-items: center; padding: 2rem; background: rgba(26,34,31,.46); backdrop-filter: blur(4px); }
 .library-modal { position: relative; width: min(35rem, calc(100vw - 4rem)); padding: 1.65rem; border: 1px solid #d1d8d3; border-radius: .9rem; background: #fbfbf8; box-shadow: 0 24px 70px rgba(18,27,23,.22); }

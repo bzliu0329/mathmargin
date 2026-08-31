@@ -89,6 +89,9 @@ test("keeps desktop PDF folders and optional textbook treatment persistent", asy
   assert.match(desktop, /selectedDocumentIds/);
   assert.match(desktop, /Ctrl\+click, Shift\+click/);
   assert.match(desktop, /application\/x-mathmargin-document-ids/);
-  assert.match(desktop, /Move selected PDFs to folder/);
+  assert.match(desktop, /move-to-folder-command/);
+  assert.match(desktop, /move-pdf-dialog/);
+  assert.match(desktop, /Choose the destination folder/);
+  assert.match(desktop, /confirmMove/);
   assert.match(desktop, /discardDocuments/);
 });

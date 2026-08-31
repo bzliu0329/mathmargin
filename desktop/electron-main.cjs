@@ -120,9 +120,32 @@ async function runUploadSmokeTest(window) {
         [...document.querySelectorAll(".folder-nav > button")].find(button => button.textContent?.includes("All PDFs"))?.click();
         const allViewStartedAt = Date.now();
         while ((!smokeCards().length || !smokeFolderTiles().length) && Date.now() - allViewStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
-        const draggedCard = smokeCards()[0];
+        let draggedCard = smokeCards()[0];
         const destinationFolder = smokeFolderTiles()[0];
         if (!draggedCard || !destinationFolder) return { ok: false, folderCreated: true, textbookStructureSaved: true, error: "The PDF and folder were not both visible for drag-and-drop." };
+        if (!draggedCard.classList.contains("is-selected")) draggedCard.querySelector(".card-selection-toggle")?.click();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        document.querySelector(".move-to-folder-command")?.click();
+        const moveDialogStartedAt = Date.now();
+        while (!document.querySelector(".move-pdf-dialog") && Date.now() - moveDialogStartedAt < 3000) await new Promise(resolve => setTimeout(resolve, 100));
+        const moveDestinationSelect = document.querySelector(".move-pdf-dialog .move-destination-field select");
+        const selectedFolderOption = [...(moveDestinationSelect?.options ?? [])].find(option => option.textContent === smokeFolderName);
+        if (!moveDestinationSelect || !selectedFolderOption) return { ok: false, folderCreated: true, textbookStructureSaved: true, error: "Selecting a PDF did not open a destination picker containing the chosen folder." };
+        setSelectValue.call(moveDestinationSelect, selectedFolderOption.value);
+        moveDestinationSelect.dispatchEvent(new Event("change", { bubbles: true })); await new Promise(resolve => setTimeout(resolve, 100));
+        document.querySelector(".confirm-move-pdf-button")?.click();
+        const selectedMoveStartedAt = Date.now();
+        while (smokeCards()[0]?.querySelector(".explorer-location")?.textContent !== smokeFolderName && Date.now() - selectedMoveStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+        if (smokeCards()[0]?.querySelector(".explorer-location")?.textContent !== smokeFolderName) return { ok: false, folderCreated: true, textbookStructureSaved: true, error: "The selected PDF was not moved to the chosen folder." };
+        document.querySelector(".move-to-folder-command")?.click(); await new Promise(resolve => setTimeout(resolve, 100));
+        const unfiledSelect = document.querySelector(".move-pdf-dialog .move-destination-field select");
+        if (!unfiledSelect) return { ok: false, folderCreated: true, textbookStructureSaved: true, selectedPdfMoved: true, error: "The move dialog could not be reopened." };
+        setSelectValue.call(unfiledSelect, "__unfiled__"); unfiledSelect.dispatchEvent(new Event("change", { bubbles: true })); await new Promise(resolve => setTimeout(resolve, 100));
+        document.querySelector(".confirm-move-pdf-button")?.click();
+        const unfiledMoveStartedAt = Date.now();
+        while (smokeCards()[0]?.querySelector(".explorer-location")?.textContent !== "Unfiled" && Date.now() - unfiledMoveStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+        if (smokeCards()[0]?.querySelector(".explorer-location")?.textContent !== "Unfiled") return { ok: false, folderCreated: true, textbookStructureSaved: true, selectedPdfMoved: true, error: "The destination picker did not move the PDF back to Unfiled." };
+        draggedCard = smokeCards()[0];
         const moveTransfer = new DataTransfer();
         draggedCard.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: moveTransfer }));
         destinationFolder.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: moveTransfer }));
@@ -469,7 +492,7 @@ async function runUploadSmokeTest(window) {
         while (document.querySelector(".books-section h2")?.textContent === importFolderName && Date.now() - importFolderCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
         const importedPdfStillVisible = [...document.querySelectorAll(".book-card")].some(card => card.textContent?.includes("imported-" + smokeToken));
         const importedFolderStillVisible = [...document.querySelectorAll(".library-folder-tile")].some(tile => tile.textContent?.includes(importFolderName));
-        return { ok: !importedPdfStillVisible && !importedFolderStillVisible, folderCreated: true, folderRenamed: true, folderDeleted: true, folderCascadeDelete: true, folderImport: true, recursiveFolderImport: true, subfolderHierarchy: true, nestedFolderNavigation: true, hierarchicalCascadeDelete: true, folderImportTextbookOption: true, multiSelection: true, bulkTextbookAction: true, folderIconVisible: true, folderIconOpened: true, explorerToolbar: true, explorerAddressBar: true, explorerSearch: true, explorerLayoutToggle: true, treatAsTextbookOption: true, readerTextbookToggle: true, textbookStructureSaved: true, assignedByDrag: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: true, folderCleanedUp: true };
+        return { ok: !importedPdfStillVisible && !importedFolderStillVisible, folderCreated: true, folderRenamed: true, folderDeleted: true, folderCascadeDelete: true, folderImport: true, recursiveFolderImport: true, subfolderHierarchy: true, nestedFolderNavigation: true, hierarchicalCascadeDelete: true, folderImportTextbookOption: true, multiSelection: true, bulkTextbookAction: true, selectedPdfMoved: true, folderIconVisible: true, folderIconOpened: true, explorerToolbar: true, explorerAddressBar: true, explorerSearch: true, explorerLayoutToggle: true, treatAsTextbookOption: true, readerTextbookToggle: true, textbookStructureSaved: true, assignedByDrag: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: true, folderCleanedUp: true };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
