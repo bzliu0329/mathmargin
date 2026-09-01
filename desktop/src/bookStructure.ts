@@ -1,6 +1,8 @@
 import type { BookStructureEntry } from "../../lib/types";
 
-export const BOOK_STRUCTURE_VERSION = 3;
+// Incrementing this version makes existing textbook records rescan so bookmarks
+// take precedence even when an older text-derived structure was already cached.
+export const BOOK_STRUCTURE_VERSION = 4;
 
 type PdfOutlineItem = { title?: string; dest?: string | unknown[] | null; items?: PdfOutlineItem[] };
 type PdfTextItem = { str: string; transform: number[]; height?: number; fontName?: string };
@@ -143,5 +145,7 @@ async function inferFromText(pdf: StructurePdf, onProgress?: (pageNumber: number
 
 export async function extractBookStructure(pdf: StructurePdf, onProgress?: (pageNumber: number, pageCount: number) => void) {
   const outline = await readOutline(pdf);
+  // A usable PDF outline is authoritative. Text scanning is only a fallback for
+  // PDFs without bookmarks (or whose bookmark destinations are broken).
   return numberStructure(outline.length ? outline : await inferFromText(pdf, onProgress));
 }

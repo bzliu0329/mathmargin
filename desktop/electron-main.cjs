@@ -210,6 +210,11 @@ async function runUploadSmokeTest(window) {
         const editorView = editorHost?.mathMarginEditorView;
         const editor = editorView?.contentDOM;
         if (!editorView || !editor) return { ok: false, uploaded: true, rendered: true, error: "The live note editor could not be created." };
+        const annotationName = "Named highlight " + smokeToken;
+        const annotationNameInput = document.querySelector(".annotation-name-input");
+        if (!annotationNameInput) return { ok: false, uploaded: true, rendered: true, error: "The annotation name field was not rendered." };
+        setInputValue.call(annotationNameInput, annotationName); annotationNameInput.dispatchEvent(new Event("input", { bubbles: true }));
+        await new Promise(resolve => setTimeout(resolve, 100));
         const selectedHighlight = document.querySelector(".annotation-mark.text.selected");
         const selectedHighlightStyle = selectedHighlight ? getComputedStyle(selectedHighlight) : null;
         if (!selectedHighlightStyle || selectedHighlightStyle.outlineStyle !== "none" || parseFloat(selectedHighlightStyle.borderTopWidth) > 0 || parseFloat(selectedHighlightStyle.borderRightWidth) > 0 || parseFloat(selectedHighlightStyle.borderBottomWidth) > 0 || parseFloat(selectedHighlightStyle.borderLeftWidth) > 0) {
@@ -308,6 +313,9 @@ async function runUploadSmokeTest(window) {
         if (!document.querySelector(".annotation-chapter-heading") || !document.querySelector(".annotation-section-heading") || !document.querySelector(".notes-list .note-card")) {
           return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, error: "All annotations were not grouped into a chapter and section." };
         }
+        if (!document.querySelector('[data-structure-source="outline"]') || !document.querySelector(".structure-source")?.textContent?.includes("PDF’s bookmarks")) {
+          return { ok: false, uploaded: true, rendered: true, chapterGrouping: true, error: "The PDF outline was not preferred for textbook structure." };
+        }
         const emptySectionCounts = [...document.querySelectorAll(".annotation-section-heading small")].filter(element => element.textContent?.trim() === "0 notes");
         if (!emptySectionCounts.length || !document.querySelector(".empty-section-notes")) {
           return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, chapterGrouping: true, error: "Detected sections without annotations were hidden from All annotations." };
@@ -393,8 +401,17 @@ async function runUploadSmokeTest(window) {
         while (!document.querySelector(".link-candidate-list button") && Date.now() - linkPickerStartedAt < 5000) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
+        const liveCrossBookName = "Live cross-book " + smokeToken;
+        window.dispatchEvent(new CustomEvent("mathmargin:annotation-live-update", { detail: { kind: "upsert", annotation: { id: "external-" + smokeToken, documentId: "external-book-" + smokeToken, pageNumber: 7, type: "area", geometry: { x: .1, y: .1, width: .1, height: .1 }, selectedText: null, title: liveCrossBookName, bodyMarkdown: "Fresh note from another open book", color: "blue", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } } }));
+        const linkSearchInput = document.querySelector("#annotation-link-search");
+        if (!linkSearchInput || !linkSearchInput.placeholder.includes("annotation name")) return { ok: false, uploaded: true, rendered: true, areaMoved: true, boxOptions: true, error: "Annotation-name lookup was not available." };
+        setInputValue.call(linkSearchInput, liveCrossBookName); linkSearchInput.dispatchEvent(new Event("input", { bubbles: true }));
+        const liveSearchStartedAt = Date.now();
+        while (!document.querySelector('.link-candidate-list button[data-annotation-name="' + CSS.escape(liveCrossBookName) + '"]') && Date.now() - liveSearchStartedAt < 3000) await new Promise(resolve => setTimeout(resolve, 100));
+        if (!document.querySelector('.link-candidate-list button[data-annotation-name="' + CSS.escape(liveCrossBookName) + '"]')) return { ok: false, uploaded: true, rendered: true, areaMoved: true, boxOptions: true, error: "A live annotation update from another book was not searchable by annotation name." };
+        setInputValue.call(linkSearchInput, annotationName); linkSearchInput.dispatchEvent(new Event("input", { bubbles: true })); await new Promise(resolve => setTimeout(resolve, 100));
         const currentDocumentId = location.hash.replace("#/reader/", "");
-        const linkCandidate = document.querySelector('.link-candidate-list button[data-document-id="' + CSS.escape(currentDocumentId ?? "") + '"][data-annotation-type="text"]');
+        const linkCandidate = document.querySelector('.link-candidate-list button[data-document-id="' + CSS.escape(currentDocumentId ?? "") + '"][data-annotation-type="text"][data-annotation-name="' + CSS.escape(annotationName) + '"]');
         if (!linkCandidate) return { ok: false, uploaded: true, rendered: true, areaMoved: true, boxOptions: true, error: "The annotation link picker did not list the existing highlight." };
         linkCandidate.click();
         const linkedStartedAt = Date.now();
@@ -504,7 +521,7 @@ async function runUploadSmokeTest(window) {
         while (document.querySelector(".books-section h2")?.textContent === importFolderName && Date.now() - importFolderCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
         const importedPdfStillVisible = [...document.querySelectorAll(".book-card")].some(card => card.textContent?.includes("imported-" + smokeToken));
         const importedFolderStillVisible = [...document.querySelectorAll(".library-folder-tile")].some(tile => tile.textContent?.includes(importFolderName));
-        return { ok: !importedPdfStillVisible && !importedFolderStillVisible, unfiledDefault: true, allPdfsRemoved: true, movedPdfLeavesUnfiled: true, folderCreated: true, folderRenamed: true, folderDeleted: true, folderCascadeDelete: true, folderImport: true, recursiveFolderImport: true, subfolderHierarchy: true, nestedFolderNavigation: true, hierarchicalCascadeDelete: true, folderImportTextbookOption: true, multiSelection: true, bulkTextbookAction: true, selectedPdfMoved: true, folderIconVisible: true, folderIconOpened: true, explorerToolbar: true, explorerAddressBar: true, explorerSearch: true, explorerLayoutToggle: true, treatAsTextbookOption: true, readerTextbookToggle: true, textbookStructureSaved: true, assignedByDrag: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: true, folderCleanedUp: true };
+        return { ok: !importedPdfStillVisible && !importedFolderStillVisible, bookmarkStructurePreferred: true, liveCrossBookAnnotations: true, annotationNameLookup: true, unfiledDefault: true, allPdfsRemoved: true, movedPdfLeavesUnfiled: true, folderCreated: true, folderRenamed: true, folderDeleted: true, folderCascadeDelete: true, folderImport: true, recursiveFolderImport: true, subfolderHierarchy: true, nestedFolderNavigation: true, hierarchicalCascadeDelete: true, folderImportTextbookOption: true, multiSelection: true, bulkTextbookAction: true, selectedPdfMoved: true, folderIconVisible: true, folderIconOpened: true, explorerToolbar: true, explorerAddressBar: true, explorerSearch: true, explorerLayoutToggle: true, treatAsTextbookOption: true, readerTextbookToggle: true, textbookStructureSaved: true, assignedByDrag: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: true, folderCleanedUp: true };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }

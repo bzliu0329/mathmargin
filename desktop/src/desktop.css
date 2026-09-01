@@ -279,6 +279,9 @@ button, a, input, textarea, label { -webkit-app-region: no-drag; }
 .notes-panel .notes-empty h3 { font-size: calc(1.1rem * var(--notes-font-scale, 1)); }
 .notes-panel .notes-empty p { font-size: calc(.76rem * var(--notes-font-scale, 1)); }
 .notes-panel .structure-status { font-size: calc(.64rem * var(--notes-font-scale, 1)); }
+.notes-panel .structure-status.structure-source { padding: .48rem .62rem; }
+.notes-panel .structure-status.structure-source.outline::before { content: "☷"; font-weight: 800; }
+.notes-panel .structure-status.structure-source.text::before { content: "T"; font-weight: 800; }
 .notes-panel .structure-status.structure-off { align-items: flex-start; justify-content: space-between; gap: .75rem; border-style: dashed; }
 .structure-off > div { display: grid; gap: .18rem; }
 .structure-off strong { color: #3f5f51; font-size: calc(.67rem * var(--notes-font-scale, 1)); }

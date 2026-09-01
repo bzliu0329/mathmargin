@@ -22,8 +22,11 @@ const KATEX_MACROS = {
 const NOTES_WIDTH_KEY = "mathmargin:notes-width";
 const OPEN_BOOKS_KEY = "mathmargin:open-books";
 const EXPLORER_LAYOUT_KEY = "mathmargin:explorer-layout";
+const LIVE_ANNOTATION_EVENT = "mathmargin:annotation-live-update";
+const liveAnnotationSnapshots = new Map<string, AnnotationRecord>();
 const AREA_RESIZE_HANDLES = ["nw", "ne", "sw", "se"] as const;
 type AreaResizeHandle = typeof AREA_RESIZE_HANDLES[number];
+type LiveAnnotationDetail = { kind: "upsert"; annotation: AnnotationRecord } | { kind: "delete"; annotationId: string };
 
 function clamp(value: number, min = 0, max = 1) { return Math.min(max, Math.max(min, value)); }
 function isTextGeometry(value: AnnotationGeometry): value is { rects: NormalizedRect[] } { return "rects" in value; }
@@ -76,6 +79,27 @@ function moveAreaRect(rect: NormalizedRect, deltaX: number, deltaY: number) {
 function annotationDescription(annotation: AnnotationRecord) {
   const content = annotation.title?.trim() || annotation.bodyMarkdown.trim() || annotation.selectedText?.trim();
   return content ? content.replace(/\s+/g, " ").slice(0, 90) : `${annotation.type === "area" ? "Area" : "Highlight"} annotation`;
+}
+function upsertAnnotation(records: AnnotationRecord[], annotation: AnnotationRecord) {
+  return records.some((record) => record.id === annotation.id)
+    ? records.map((record) => record.id === annotation.id ? annotation : record)
+    : [...records, annotation];
+}
+function rememberSavedAnnotations(records: AnnotationRecord[]) {
+  for (const annotation of records) {
+    const live = liveAnnotationSnapshots.get(annotation.id);
+    if (!live || live.updatedAt < annotation.updatedAt) liveAnnotationSnapshots.set(annotation.id, annotation);
+  }
+}
+function mergeLiveAnnotations(records: AnnotationRecord[]) {
+  const merged = new Map(records.map((annotation) => [annotation.id, annotation]));
+  for (const annotation of liveAnnotationSnapshots.values()) merged.set(annotation.id, annotation);
+  return [...merged.values()];
+}
+function publishLiveAnnotation(detail: LiveAnnotationDetail) {
+  if (detail.kind === "upsert") liveAnnotationSnapshots.set(detail.annotation.id, detail.annotation);
+  else liveAnnotationSnapshots.delete(detail.annotationId);
+  window.dispatchEvent(new CustomEvent<LiveAnnotationDetail>(LIVE_ANNOTATION_EVENT, { detail }));
 }
 function mathError(markdown: string) {
   try {
@@ -647,15 +671,33 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
       if (!record) throw new Error("This PDF was not found in the local library.");
       const opened = { ...record, lastOpenedAt: new Date().toISOString() }; await putDocument(opened);
       const textbookMode = treatsDocumentAsTextbook(opened);
-      setDocument(opened); setAnnotations(saved); setBookStructure(textbookMode ? opened.bookStructure ?? [] : []);
+      rememberSavedAnnotations(saved);
+      const currentAnnotations = mergeLiveAnnotations(saved).filter((annotation) => annotation.documentId === documentId);
+      setDocument(opened); setAnnotations(currentAnnotations); setBookStructure(textbookMode ? opened.bookStructure ?? [] : []);
       const pendingAnnotationId = sessionStorage.getItem("mathmargin:open-annotation");
-      const pendingAnnotation = saved.find((annotation) => annotation.id === pendingAnnotationId);
+      const pendingAnnotation = currentAnnotations.find((annotation) => annotation.id === pendingAnnotationId);
       if (pendingAnnotation) {
         setSelectedId(pendingAnnotation.id); setPageNumber(pendingAnnotation.pageNumber); setSidebarOpen(true);
         sessionStorage.removeItem("mathmargin:open-annotation");
       }
       setStructureState(textbookMode && opened.bookStructureScannedAt && opened.bookStructureVersion === BOOK_STRUCTURE_VERSION ? (opened.bookStructure?.length ? "ready" : "empty") : "idle");
     }).catch((cause) => setError(message(cause, "This PDF could not be opened."))).finally(() => setLoading(false));
+  }, [documentId]);
+  useEffect(() => {
+    const synchronize = (event: Event) => {
+      const detail = (event as CustomEvent<LiveAnnotationDetail>).detail;
+      if (!detail) return;
+      if (detail.kind === "delete") {
+        setLinkLibrary((current) => ({ ...current, annotations: current.annotations.filter((annotation) => annotation.id !== detail.annotationId) }));
+        setAnnotations((current) => current.filter((annotation) => annotation.id !== detail.annotationId));
+        setSelectedId((current) => current === detail.annotationId ? "" : current);
+        return;
+      }
+      setLinkLibrary((current) => ({ ...current, annotations: upsertAnnotation(current.annotations, detail.annotation) }));
+      if (detail.annotation.documentId === documentId) setAnnotations((current) => upsertAnnotation(current, detail.annotation));
+    };
+    window.addEventListener(LIVE_ANNOTATION_EVENT, synchronize);
+    return () => window.removeEventListener(LIVE_ANNOTATION_EVENT, synchronize);
   }, [documentId]);
   useEffect(() => {
     if (!isActive) return;
@@ -690,7 +732,8 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
         createdAt: item.createdAt, updatedAt: item.updatedAt, lastOpenedAt: item.lastOpenedAt, treatAsTextbook: item.treatAsTextbook, documentType: item.documentType, folderId: item.folderId, bookStructure: item.bookStructure,
         bookStructureScannedAt: item.bookStructureScannedAt, bookStructureVersion: item.bookStructureVersion,
       }));
-      if (!cancelled) { setLinkLibrary({ documents: summaries, annotations: saved }); setLinkLibraryState("ready"); }
+      rememberSavedAnnotations(saved);
+      if (!cancelled) { setLinkLibrary({ documents: summaries, annotations: mergeLiveAnnotations(saved) }); setLinkLibraryState("ready"); }
     }).catch(() => { if (!cancelled) setLinkLibraryState("error"); });
     return () => { cancelled = true; };
   }, [selectedId]);
@@ -784,22 +827,26 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
     }
   }
   function update(id: string, changes: Partial<AnnotationRecord>) {
-    setAnnotations((current) => current.map((item) => {
-      if (item.id !== id) return item;
-      const next = { ...item, ...changes, updatedAt: new Date().toISOString() };
-      const timer = saveTimers.current.get(id); if (timer) clearTimeout(timer);
-      saveTimers.current.set(id, setTimeout(() => save(next), 450)); setSaveState("saving");
-      return next;
-    }));
+    const current = annotations.find((annotation) => annotation.id === id);
+    if (!current) return;
+    const next = { ...current, ...changes, updatedAt: new Date().toISOString() };
+    setAnnotations((records) => upsertAnnotation(records, next));
+    setLinkLibrary((library) => ({ ...library, annotations: upsertAnnotation(library.annotations, next) }));
+    publishLiveAnnotation({ kind: "upsert", annotation: next });
+    const timer = saveTimers.current.get(id); if (timer) clearTimeout(timer);
+    saveTimers.current.set(id, setTimeout(() => save(next), 450)); setSaveState("saving");
   }
   async function create(type: "text" | "area", geometry: AnnotationGeometry, selectedText: string | null = null) {
     const now = new Date().toISOString();
     const annotation: AnnotationRecord = { id: crypto.randomUUID(), documentId, pageNumber, type, geometry, selectedText, bodyMarkdown: "", color: type === "text" ? "gold" : "sage", createdAt: now, updatedAt: now };
-    setAnnotations((current) => [...current, annotation]); setSelectedId(annotation.id); setSidebarOpen(true); await save(annotation);
+    setAnnotations((current) => upsertAnnotation(current, annotation)); setSelectedId(annotation.id); setSidebarOpen(true);
+    publishLiveAnnotation({ kind: "upsert", annotation });
+    await save(annotation);
   }
   async function discard(id: string) {
     const timer = saveTimers.current.get(id); if (timer) clearTimeout(timer); saveTimers.current.delete(id);
     await removeAnnotation(id); setAnnotations((current) => current.filter((item) => item.id !== id)); setSelectedId("");
+    publishLiveAnnotation({ kind: "delete", annotationId: id });
   }
 
   async function linkAnnotations(target: AnnotationRecord) {
@@ -812,7 +859,8 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
     const targetTimer = saveTimers.current.get(currentTarget.id); if (targetTimer) clearTimeout(targetTimer);
     saveTimers.current.delete(selected.id); saveTimers.current.delete(currentTarget.id);
     setAnnotations((current) => current.map((annotation) => annotation.id === sourceNext.id ? sourceNext : annotation.id === targetNext.id ? targetNext : annotation));
-    setLinkLibrary((current) => ({ ...current, annotations: current.annotations.map((annotation) => annotation.id === sourceNext.id ? sourceNext : annotation.id === targetNext.id ? targetNext : annotation) }));
+    setLinkLibrary((current) => ({ ...current, annotations: upsertAnnotation(upsertAnnotation(current.annotations, sourceNext), targetNext) }));
+    publishLiveAnnotation({ kind: "upsert", annotation: sourceNext }); publishLiveAnnotation({ kind: "upsert", annotation: targetNext });
     setSaveState("saving");
     try { await Promise.all([putAnnotation(sourceNext), putAnnotation(targetNext)]); setSaveState("saved"); }
     catch (cause) { setSaveState("error"); setError(message(cause, "The annotation link could not be saved.")); }
@@ -827,7 +875,8 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
     const sourceTimer = saveTimers.current.get(selected.id); if (sourceTimer) clearTimeout(sourceTimer); saveTimers.current.delete(selected.id);
     const targetTimer = saveTimers.current.get(targetId); if (targetTimer) clearTimeout(targetTimer); saveTimers.current.delete(targetId);
     setAnnotations((current) => current.map((annotation) => annotation.id === sourceNext.id ? sourceNext : targetNext && annotation.id === targetNext.id ? targetNext : annotation));
-    setLinkLibrary((current) => ({ ...current, annotations: current.annotations.map((annotation) => annotation.id === sourceNext.id ? sourceNext : targetNext && annotation.id === targetNext.id ? targetNext : annotation) }));
+    setLinkLibrary((current) => ({ ...current, annotations: targetNext ? upsertAnnotation(upsertAnnotation(current.annotations, sourceNext), targetNext) : upsertAnnotation(current.annotations, sourceNext) }));
+    publishLiveAnnotation({ kind: "upsert", annotation: sourceNext }); if (targetNext) publishLiveAnnotation({ kind: "upsert", annotation: targetNext });
     setSaveState("saving");
     try { await Promise.all([putAnnotation(sourceNext), ...(targetNext ? [putAnnotation(targetNext)] : [])]); setSaveState("saved"); }
     catch (cause) { setSaveState("error"); setError(message(cause, "The annotation link could not be removed.")); }
@@ -983,10 +1032,24 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
   const selected = annotations.find((item) => item.id === selectedId) ?? null;
   const documentTitles = new Map(linkLibrary.documents.map((item) => [item.id, item.title]));
   const linkedAnnotations = (selected?.linkedAnnotationIds ?? []).map((id) => annotations.find((annotation) => annotation.id === id) ?? linkLibrary.annotations.find((annotation) => annotation.id === id)).filter((annotation): annotation is AnnotationRecord => Boolean(annotation));
-  const linkCandidates = linkLibrary.annotations.filter((annotation) => annotation.id !== selectedId && `${documentTitles.get(annotation.documentId) ?? "Unknown book"} ${annotationDescription(annotation)} page ${annotation.pageNumber}`.toLowerCase().includes(linkSearch.trim().toLowerCase()));
+  const normalizedLinkSearch = linkSearch.trim().toLowerCase();
+  const linkCandidates = linkLibrary.annotations
+    .filter((annotation) => annotation.id !== selectedId && `${annotation.title ?? ""} ${annotation.bodyMarkdown} ${annotation.selectedText ?? ""} ${documentTitles.get(annotation.documentId) ?? "Unknown book"} page ${annotation.pageNumber} ${annotation.type}`.toLowerCase().includes(normalizedLinkSearch))
+    .sort((left, right) => {
+      if (!normalizedLinkSearch) return right.updatedAt.localeCompare(left.updatedAt);
+      const rank = (annotation: AnnotationRecord) => {
+        const name = annotation.title?.trim().toLowerCase() ?? "";
+        if (name === normalizedLinkSearch) return 0;
+        if (name.startsWith(normalizedLinkSearch)) return 1;
+        if (name.includes(normalizedLinkSearch)) return 2;
+        return 3;
+      };
+      return rank(left) - rank(right) || right.updatedAt.localeCompare(left.updatedAt);
+    });
   const pageAnnotations = annotations.filter((item) => item.pageNumber === pageNumber);
   const latexError = selected ? mathError(selected.bodyMarkdown) : "";
   const annotationGroups = useMemo(() => groupAnnotationsByStructure(annotations, bookStructure), [annotations, bookStructure]);
+  const structureSource = bookStructure.some((entry) => entry.source === "outline") ? "outline" : bookStructure.length ? "text" : null;
   const sidebarMaximum = Math.floor(viewportWidth / 2);
   const notesFontScale = clamp(1 + (sidebarWidth - 360) / 1800, 1, 1.2);
   const readerStyle = { "--notes-width": `${sidebarWidth}px`, "--notes-font-scale": notesFontScale } as CSSProperties;
@@ -996,7 +1059,7 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
 
   return <main className={`reader-shell ${sidebarOpen ? "sidebar-is-open" : ""} ${resizingSidebar ? "is-resizing-sidebar" : ""}`} style={readerStyle}>
     <header className="reader-header desktop-drag-region"><button className="brand compact desktop-back-brand" onClick={onBack}><span className="brand-mark">M</span><span>MathMargin</span></button><div className="reader-title"><strong>{document.title}</strong><span>{document.pageCount} pages · stored locally</span></div><div className="save-indicator" data-state={saveState}><span />{saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved"}</div></header>
-    <div className="reader-toolbar"><div className="tool-group"><button className={tool === "highlight" ? "active" : ""} onClick={() => { setTool("highlight"); setDraftArea(null); }}><span className="tool-icon">T</span> Highlight</button><button className={tool === "area" ? "active" : ""} onClick={() => setTool("area")}><span className="tool-icon rectangle-icon" /> Area</button></div><div className="page-controls"><button onClick={() => setPageNumber((page) => Math.max(1, page - 1))} disabled={pageNumber === 1}>←</button><input value={pageNumber} onChange={(event) => setPageNumber(clamp(Number(event.target.value) || 1, 1, document.pageCount))} /><span>of {document.pageCount}</span><button onClick={() => setPageNumber((page) => Math.min(document.pageCount, page + 1))} disabled={pageNumber === document.pageCount}>→</button></div><div className="zoom-controls" title="Pinch on a touchpad or hold Ctrl while using the mouse wheel"><button onClick={() => setZoom((value) => Math.max(.5, value - .1))}>−</button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom((value) => Math.min(3, value + .1))}>+</button></div><button className={`reader-textbook-toggle ${treatsDocumentAsTextbook(document) ? "active" : ""}`} onClick={() => void setReaderTextbookTreatment(!treatsDocumentAsTextbook(document))} disabled={structureState === "scanning"} title="Show automatically detected chapters and sections in the annotation panel"><span>§</span>{treatsDocumentAsTextbook(document) ? "Textbook structure on" : "Treat as textbook"}</button><button className="notes-toggle" onClick={() => setSidebarOpen((value) => !value)}><span>✦</span> Notes <b>{annotations.length}</b></button></div>
+    <div className="reader-toolbar"><div className="tool-group"><button className={tool === "highlight" ? "active" : ""} onClick={() => { setTool("highlight"); setDraftArea(null); }}><span className="tool-icon">T</span> Highlight</button><button className={tool === "area" ? "active" : ""} onClick={() => setTool("area")}><span className="tool-icon rectangle-icon" /> Area</button></div><div className="page-controls"><button onClick={() => setPageNumber((page) => Math.max(1, page - 1))} disabled={pageNumber === 1}>←</button><input value={pageNumber} onChange={(event) => setPageNumber(clamp(Number(event.target.value) || 1, 1, document.pageCount))} /><span>of {document.pageCount}</span><button onClick={() => setPageNumber((page) => Math.min(document.pageCount, page + 1))} disabled={pageNumber === document.pageCount}>→</button></div><div className="zoom-controls" title="Pinch on a touchpad or hold Ctrl while using the mouse wheel"><button onClick={() => setZoom((value) => Math.max(.5, value - .1))}>−</button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom((value) => Math.min(3, value + .1))}>+</button></div><button className={`reader-textbook-toggle ${treatsDocumentAsTextbook(document) ? "active" : ""}`} onClick={() => void setReaderTextbookTreatment(!treatsDocumentAsTextbook(document))} disabled={structureState === "scanning"} title="Use PDF bookmarks for chapters and sections when available; otherwise detect headings from page text"><span>§</span>{treatsDocumentAsTextbook(document) ? "Textbook structure on" : "Treat as textbook"}</button><button className="notes-toggle" onClick={() => setSidebarOpen((value) => !value)}><span>✦</span> Notes <b>{annotations.length}</b></button></div>
     <div className="reader-body" style={readerBodyStyle}><section className="pdf-stage" ref={pdfStageRef}><div className="tool-tip">{tool === "highlight" ? "Select text to add a note" : "Drag over a formula, figure, or passage"} · Pinch or Ctrl+wheel to zoom</div><Document file={pdfUrl} loading={<div className="pdf-loading"><span className="spinner" /> Rendering page…</div>} onLoadSuccess={(pdf) => { const loadedPdf = pdf as unknown as Parameters<typeof extractBookStructure>[0]; pdfDocumentRef.current = loadedPdf; void readBookStructure(loadedPdf); }} onLoadError={(cause) => setError(message(cause, "The PDF could not be rendered."))}><div className="pdf-page-wrap" ref={pageRef} onMouseUp={selectText}><Page pageNumber={pageNumber} width={Math.round(760 * zoom)} renderAnnotationLayer={false} renderTextLayer />
       <div className="annotation-layer">
         {pageAnnotations.flatMap((annotation) => (isTextGeometry(annotation.geometry) ? annotation.geometry.rects : [annotation.geometry]).map((rect, index) => <button key={`${annotation.id}-${index}`} type="button" aria-label={`Open ${annotation.type === "area" ? "area" : "highlight"} annotation on page ${annotation.pageNumber}`} title="Open annotation" className={`annotation-mark ${annotation.type} color-${annotation.color} ${selectedId === annotation.id ? "selected" : ""}`} style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }} onClick={(event) => { event.stopPropagation(); setSelectedId(annotation.id); setSidebarOpen(true); }} />))}
@@ -1020,9 +1083,9 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
         <label className="annotation-name-label" htmlFor={`annotation-name-${selected.id}`}>Annotation name</label><input id={`annotation-name-${selected.id}`} className="annotation-name-input" value={selected.title ?? ""} onChange={(event) => update(selected.id, { title: event.target.value.slice(0, 120) })} placeholder={`Page ${selected.pageNumber} ${selected.type === "text" ? "highlight" : "area"}`} />
         <section className="annotation-links" aria-label="Linked annotations"><div className="annotation-links-heading"><div><strong>Linked annotations</strong><span>{linkedAnnotations.length || "None yet"}</span></div><button type="button" onClick={() => setLinkPickerOpen((open) => !open)}>{linkPickerOpen ? "Close" : "+ Link"}</button></div>
           {linkedAnnotations.length > 0 && <div className="annotation-linked-list">{linkedAnnotations.map((annotation) => <div className="annotation-linked-item" key={annotation.id}><button type="button" onClick={() => openLinkedAnnotation(annotation)}><span>{documentTitles.get(annotation.documentId) ?? (annotation.documentId === documentId ? document.title : "Another PDF")}</span><strong>{annotationDescription(annotation)}</strong><small>Page {annotation.pageNumber} · {annotation.type}</small></button><button type="button" className="unlink-annotation" aria-label={`Unlink ${annotationDescription(annotation)}`} title="Unlink annotation" onClick={() => unlinkAnnotations(annotation.id)}>×</button></div>)}</div>}
-          {linkPickerOpen && <div className="annotation-link-picker"><label htmlFor="annotation-link-search">Link another note</label><input id="annotation-link-search" value={linkSearch} onChange={(event) => setLinkSearch(event.target.value)} placeholder="Search every PDF…" />{linkLibraryState === "loading" ? <div className="link-picker-status"><span className="spinner" /> Loading annotations…</div> : linkLibraryState === "error" ? <div className="link-picker-status error">Annotations could not be loaded.</div> : <div className="link-candidate-list">{linkCandidates.map((annotation) => { const linked = selected.linkedAnnotationIds?.includes(annotation.id); return <button type="button" key={annotation.id} data-document-id={annotation.documentId} data-annotation-type={annotation.type} className={linked ? "linked" : ""} onClick={() => linked ? unlinkAnnotations(annotation.id) : linkAnnotations(annotation)}><span>{documentTitles.get(annotation.documentId) ?? "Unknown PDF"}</span><strong>{annotationDescription(annotation)}</strong><small>Page {annotation.pageNumber} · {annotation.type}<b>{linked ? "Unlink" : "Link"}</b></small></button>; })}{!linkCandidates.length && linkLibraryState === "ready" && <div className="link-picker-status">No matching annotations.</div>}</div>}</div>}
+          {linkPickerOpen && <div className="annotation-link-picker"><label htmlFor="annotation-link-search">Look up an annotation</label><input id="annotation-link-search" value={linkSearch} onChange={(event) => setLinkSearch(event.target.value)} placeholder="Search by annotation name, note, or PDF…" />{linkLibraryState === "loading" ? <div className="link-picker-status"><span className="spinner" /> Loading annotations…</div> : linkLibraryState === "error" ? <div className="link-picker-status error">Annotations could not be loaded.</div> : <div className="link-candidate-list">{linkCandidates.map((annotation) => { const linked = selected.linkedAnnotationIds?.includes(annotation.id); return <button type="button" key={annotation.id} data-document-id={annotation.documentId} data-annotation-type={annotation.type} data-annotation-name={annotation.title?.trim() ?? ""} className={linked ? "linked" : ""} onClick={() => linked ? unlinkAnnotations(annotation.id) : linkAnnotations(annotation)}><span>{documentTitles.get(annotation.documentId) ?? "Unknown PDF"}</span><strong>{annotation.title?.trim() || annotationDescription(annotation)}</strong><small>Page {annotation.pageNumber} · {annotation.type}<b>{linked ? "Unlink" : "Link"}</b></small></button>; })}{!linkCandidates.length && linkLibraryState === "ready" && <div className="link-picker-status">No matching annotation names or notes.</div>}</div>}</div>}
         </section>
-        <label className="editor-label">Your note <span>Obsidian-style live editing</span></label><div className="note-input-tools"><div className="latex-suite-status" title="Your active Obsidian LaTeX Suite snippet set is enabled. Automatic snippets expand as you type; press Tab for manual snippets and placeholder navigation."><span>⌨</span> LaTeX Suite · {LATEX_SUITE_SHORTCUT_COUNT} shortcuts · Tab to expand</div><button type="button" className="insert-callout-button" onClick={insertCallout} title="Insert an Obsidian-style note callout">＋ Callout</button></div><LiveNoteEditor key={selected.id} value={selected.bodyMarkdown} onChange={editNote} viewRef={liveEditorViewRef} macros={KATEX_MACROS} />{latexError && <div className="latex-error"><strong>LaTeX needs attention</strong>{latexError}</div>}<div className="editor-footer"><span>{selected.bodyMarkdown.length.toLocaleString()} characters</span><button className="delete-note" onClick={() => discard(selected.id)}>Delete annotation</button></div></div> : <div className="notes-list">{!treatsDocumentAsTextbook(document) && <div className="structure-status structure-off"><div><strong>Chapter detection is off</strong><span>Turn it on to organize this PDF by automatically detected chapters and sections.</span></div><button type="button" onClick={() => void setReaderTextbookTreatment(true)}>Treat as textbook</button></div>}{treatsDocumentAsTextbook(document) && structureState === "scanning" && <div className="structure-status"><span className="spinner" /> Reading chapters and sections{structureProgress ? ` · ${structureProgress}%` : "…"}</div>}{treatsDocumentAsTextbook(document) && structureState === "error" && <div className="structure-status warning">Chapter detection could not finish. Notes are still grouped by page.</div>}{treatsDocumentAsTextbook(document) && structureState === "empty" && <div className="structure-status">No chapter headings were found in this PDF.</div>}{annotationGroups.length ? annotationGroups.map((chapter) => <section className="annotation-chapter" key={chapter.key}><button type="button" className="annotation-chapter-heading" data-page-number={chapter.pageNumber} onClick={() => setPageNumber(chapter.pageNumber)} title={`Go to page ${chapter.pageNumber}`}><strong>{chapter.number ? `Chapter ${chapter.number} · ` : ""}{structureTitle(chapter.title, chapter.number, 0)}</strong><span>{chapter.sections.reduce((total, section) => total + section.annotations.length, 0)}</span></button>{chapter.sections.map((section) => <div className="annotation-section" key={section.key}><button type="button" className="annotation-section-heading" data-page-number={section.pageNumber} onClick={() => setPageNumber(section.pageNumber)} title={`Go to page ${section.pageNumber}`}><span>{section.number ? `Section ${section.number} · ` : ""}{structureTitle(section.title, section.number, 1)}</span><small>{section.annotations.length} {section.annotations.length === 1 ? "note" : "notes"}</small></button>{section.annotations.map((annotation) => <button className="note-card" key={annotation.id} onClick={() => { setSelectedId(annotation.id); setPageNumber(annotation.pageNumber); }}><span className={`note-stripe ${annotation.color}`} /><span className="note-card-copy"><span className="note-card-meta">Page {annotation.pageNumber} · {annotation.type}</span><strong>{annotation.title?.trim() || annotation.bodyMarkdown || annotation.selectedText || "Untitled annotation"}</strong></span><span>→</span></button>)}{!section.annotations.length && <div className="empty-section-notes">No notes in this section</div>}</div>)}{!chapter.sections.length && <div className="empty-section-notes chapter-empty">No sections or notes yet</div>}</section>) : <div className="notes-empty"><div>∴</div><h3>No annotations yet</h3><p>Select text or draw an area on the page. Your note will open here.</p></div>}</div>}</aside>
+        <label className="editor-label">Your note <span>Obsidian-style live editing</span></label><div className="note-input-tools"><div className="latex-suite-status" title="Your active Obsidian LaTeX Suite snippet set is enabled. Automatic snippets expand as you type; press Tab for manual snippets and placeholder navigation."><span>⌨</span> LaTeX Suite · {LATEX_SUITE_SHORTCUT_COUNT} shortcuts · Tab to expand</div><button type="button" className="insert-callout-button" onClick={insertCallout} title="Insert an Obsidian-style note callout">＋ Callout</button></div><LiveNoteEditor key={selected.id} value={selected.bodyMarkdown} onChange={editNote} viewRef={liveEditorViewRef} macros={KATEX_MACROS} />{latexError && <div className="latex-error"><strong>LaTeX needs attention</strong>{latexError}</div>}<div className="editor-footer"><span>{selected.bodyMarkdown.length.toLocaleString()} characters</span><button className="delete-note" onClick={() => discard(selected.id)}>Delete annotation</button></div></div> : <div className="notes-list">{!treatsDocumentAsTextbook(document) && <div className="structure-status structure-off"><div><strong>Chapter detection is off</strong><span>Turn it on to organize this PDF using bookmarks first, then detected headings when bookmarks are unavailable.</span></div><button type="button" onClick={() => void setReaderTextbookTreatment(true)}>Treat as textbook</button></div>}{treatsDocumentAsTextbook(document) && structureState === "scanning" && <div className="structure-status"><span className="spinner" /> Reading PDF bookmarks and headings{structureProgress ? ` · ${structureProgress}%` : "…"}</div>}{treatsDocumentAsTextbook(document) && structureState === "ready" && structureSource && <div className={`structure-status structure-source ${structureSource}`} data-structure-source={structureSource}>{structureSource === "outline" ? "Using this PDF’s bookmarks for chapters and sections." : "No usable PDF bookmarks found; using detected page headings."}</div>}{treatsDocumentAsTextbook(document) && structureState === "error" && <div className="structure-status warning">Chapter detection could not finish. Notes are still grouped by page.</div>}{treatsDocumentAsTextbook(document) && structureState === "empty" && <div className="structure-status">No PDF bookmarks or chapter headings were found.</div>}{annotationGroups.length ? annotationGroups.map((chapter) => <section className="annotation-chapter" key={chapter.key}><button type="button" className="annotation-chapter-heading" data-page-number={chapter.pageNumber} onClick={() => setPageNumber(chapter.pageNumber)} title={`Go to page ${chapter.pageNumber}`}><strong>{chapter.number ? `Chapter ${chapter.number} · ` : ""}{structureTitle(chapter.title, chapter.number, 0)}</strong><span>{chapter.sections.reduce((total, section) => total + section.annotations.length, 0)}</span></button>{chapter.sections.map((section) => <div className="annotation-section" key={section.key}><button type="button" className="annotation-section-heading" data-page-number={section.pageNumber} onClick={() => setPageNumber(section.pageNumber)} title={`Go to page ${section.pageNumber}`}><span>{section.number ? `Section ${section.number} · ` : ""}{structureTitle(section.title, section.number, 1)}</span><small>{section.annotations.length} {section.annotations.length === 1 ? "note" : "notes"}</small></button>{section.annotations.map((annotation) => <button className="note-card" key={annotation.id} onClick={() => { setSelectedId(annotation.id); setPageNumber(annotation.pageNumber); }}><span className={`note-stripe ${annotation.color}`} /><span className="note-card-copy"><span className="note-card-meta">Page {annotation.pageNumber} · {annotation.type}</span><strong>{annotation.title?.trim() || annotation.bodyMarkdown || annotation.selectedText || "Untitled annotation"}</strong></span><span>→</span></button>)}{!section.annotations.length && <div className="empty-section-notes">No notes in this section</div>}</div>)}{!chapter.sections.length && <div className="empty-section-notes chapter-empty">No sections or notes yet</div>}</section>) : <div className="notes-empty"><div>∴</div><h3>No annotations yet</h3><p>Select text or draw an area on the page. Your note will open here.</p></div>}</div>}</aside>
     </div>
   </main>;
 }

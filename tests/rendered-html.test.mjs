@@ -96,4 +96,15 @@ test("keeps desktop PDF folders and optional textbook treatment persistent", asy
   assert.match(desktop, /Choose the destination folder/);
   assert.match(desktop, /confirmMove/);
   assert.match(desktop, /discardDocuments/);
+  assert.match(desktop, /LIVE_ANNOTATION_EVENT/);
+  assert.match(desktop, /publishLiveAnnotation/);
+  assert.match(desktop, /mergeLiveAnnotations/);
+  assert.match(desktop, /Search by annotation name, note, or PDF/);
+  assert.match(desktop, /data-annotation-name/);
+  assert.match(desktop, /name === normalizedLinkSearch/);
+  assert.match(desktop, /data-structure-source/);
+  assert.match(desktop, /Using this PDF’s bookmarks/);
+  const structure = await readFile(new URL("desktop/src/bookStructure.ts", root), "utf8");
+  assert.match(structure, /BOOK_STRUCTURE_VERSION = 4/);
+  assert.match(structure, /outline\.length \? outline : await inferFromText/);
 });
