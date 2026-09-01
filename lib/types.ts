@@ -15,6 +15,8 @@ export type DocumentRecord = {
   bookStructure?: BookStructureEntry[];
   bookStructureScannedAt?: string;
   bookStructureVersion?: number;
+  bookStructureImportedFrom?: string;
+  bookStructureImportMode?: "exact" | "proportional";
 };
 
 export type DocumentType = "textbook" | "problem-set";

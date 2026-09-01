@@ -6,7 +6,7 @@ export const BOOK_STRUCTURE_VERSION = 4;
 
 type PdfOutlineItem = { title?: string; dest?: string | unknown[] | null; items?: PdfOutlineItem[] };
 type PdfTextItem = { str: string; transform: number[]; height?: number; fontName?: string };
-type StructurePdf = {
+export type StructurePdf = {
   numPages: number;
   getOutline: () => Promise<PdfOutlineItem[] | null>;
   getDestination: (name: string) => Promise<unknown[] | null>;
@@ -80,6 +80,26 @@ async function readOutline(pdf: StructurePdf) {
     .sort((a, b) => a.pageNumber - b.pageNumber);
 }
 
+export async function extractBookmarkStructure(pdf: StructurePdf) {
+  return numberStructure(await readOutline(pdf));
+}
+
+export function mapBookmarkStructure(entries: BookStructureEntry[], sourcePageCount: number, targetPageCount: number) {
+  const sourcePages = Math.max(1, sourcePageCount);
+  const targetPages = Math.max(1, targetPageCount);
+  const exact = sourcePages === targetPages;
+  return entries.map((entry) => {
+    const pageNumber = exact
+      ? clampPage(entry.pageNumber, targetPages)
+      : Math.round(((clampPage(entry.pageNumber, sourcePages) - 1) / Math.max(1, sourcePages - 1)) * Math.max(0, targetPages - 1)) + 1;
+    return { ...entry, pageNumber, source: "outline" as const, id: entryId("outline", pageNumber, entry.level, entry.title) };
+  });
+}
+
+function clampPage(pageNumber: number, pageCount: number) {
+  return Math.min(pageCount, Math.max(1, Math.round(pageNumber)));
+}
+
 function median(values: number[]) {
   if (!values.length) return 0;
   const ordered = [...values].sort((a, b) => a - b);
@@ -144,8 +164,8 @@ async function inferFromText(pdf: StructurePdf, onProgress?: (pageNumber: number
 }
 
 export async function extractBookStructure(pdf: StructurePdf, onProgress?: (pageNumber: number, pageCount: number) => void) {
-  const outline = await readOutline(pdf);
+  const outline = await extractBookmarkStructure(pdf);
   // A usable PDF outline is authoritative. Text scanning is only a fallback for
   // PDFs without bookmarks (or whose bookmark destinations are broken).
-  return numberStructure(outline.length ? outline : await inferFromText(pdf, onProgress));
+  return outline.length ? outline : numberStructure(await inferFromText(pdf, onProgress));
 }

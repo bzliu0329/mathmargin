@@ -7,7 +7,7 @@ import type { AnnotationColor, AnnotationGeometry, AnnotationRecord, BookStructu
 import { ANNOTATION_COLORS, MAX_PDF_SIZE } from "../../lib/types";
 import { getAnnotation, getDocument, listAllAnnotations, listAnnotations, listDocuments, listFolders, putAnnotation, putDocument, putFolder, removeAnnotation, removeDocument, removeFolder, type LocalDocument } from "./storage";
 import { LATEX_SUITE_SHORTCUT_COUNT } from "./latexSuite";
-import { BOOK_STRUCTURE_VERSION, extractBookStructure } from "./bookStructure";
+import { BOOK_STRUCTURE_VERSION, extractBookmarkStructure, extractBookStructure, mapBookmarkStructure } from "./bookStructure";
 import { LiveNoteEditor } from "./LiveNoteEditor";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
@@ -27,6 +27,12 @@ const liveAnnotationSnapshots = new Map<string, AnnotationRecord>();
 const AREA_RESIZE_HANDLES = ["nw", "ne", "sw", "se"] as const;
 type AreaResizeHandle = typeof AREA_RESIZE_HANDLES[number];
 type LiveAnnotationDetail = { kind: "upsert"; annotation: AnnotationRecord } | { kind: "delete"; annotationId: string };
+type BookmarkImportPreview = {
+  fileName: string;
+  sourcePageCount: number;
+  mappedEntries: BookStructureEntry[];
+  mode: "exact" | "proportional";
+};
 
 function clamp(value: number, min = 0, max = 1) { return Math.min(max, Math.max(min, value)); }
 function isTextGeometry(value: AnnotationGeometry): value is { rects: NormalizedRect[] } { return "rects" in value; }
@@ -458,7 +464,7 @@ function DesktopLibrary({ onOpen, onRename, onDelete }: { onOpen: (document: Loc
     const targetIds = new Set(targets.map((document) => document.id));
     const now = new Date().toISOString();
     const updated: LocalDocument[] = targets.map((document) => ({
-      ...document, treatAsTextbook: enabled, bookStructure: undefined, bookStructureScannedAt: undefined, bookStructureVersion: undefined, updatedAt: now,
+      ...document, treatAsTextbook: enabled, bookStructure: undefined, bookStructureScannedAt: undefined, bookStructureVersion: undefined, bookStructureImportedFrom: undefined, bookStructureImportMode: undefined, updatedAt: now,
     }));
     const updatedById = new Map(updated.map((document) => [document.id, document]));
     try {
@@ -644,6 +650,8 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
   const [bookStructure, setBookStructure] = useState<BookStructureEntry[]>([]);
   const [structureState, setStructureState] = useState<"idle" | "scanning" | "ready" | "empty" | "error">("idle");
   const [structureProgress, setStructureProgress] = useState(0);
+  const [bookmarkImporting, setBookmarkImporting] = useState(false);
+  const [bookmarkImportPreview, setBookmarkImportPreview] = useState<BookmarkImportPreview | null>(null);
   const [draftArea, setDraftArea] = useState<NormalizedRect | null>(null);
   const [areaOptionsOpenId, setAreaOptionsOpenId] = useState("");
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
@@ -655,6 +663,7 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
   const [loading, setLoading] = useState(true);
   const pdfStageRef = useRef<HTMLElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
+  const bookmarkImportInputRef = useRef<HTMLInputElement>(null);
   const pdfDocumentRef = useRef<Parameters<typeof extractBookStructure>[0] | null>(null);
   const liveEditorViewRef = useRef<EditorView | null>(null);
   const drawStart = useRef<{ x: number; y: number } | null>(null);
@@ -730,7 +739,7 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
       const summaries: DocumentRecord[] = documents.map((item) => ({
         id: item.id, title: item.title, originalFilename: item.originalFilename, fileSize: item.fileSize, pageCount: item.pageCount,
         createdAt: item.createdAt, updatedAt: item.updatedAt, lastOpenedAt: item.lastOpenedAt, treatAsTextbook: item.treatAsTextbook, documentType: item.documentType, folderId: item.folderId, bookStructure: item.bookStructure,
-        bookStructureScannedAt: item.bookStructureScannedAt, bookStructureVersion: item.bookStructureVersion,
+        bookStructureScannedAt: item.bookStructureScannedAt, bookStructureVersion: item.bookStructureVersion, bookStructureImportedFrom: item.bookStructureImportedFrom, bookStructureImportMode: item.bookStructureImportMode,
       }));
       rememberSavedAnnotations(saved);
       if (!cancelled) { setLinkLibrary({ documents: summaries, annotations: mergeLiveAnnotations(saved) }); setLinkLibraryState("ready"); }
@@ -801,7 +810,7 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
     setStructureState("scanning"); setStructureProgress(0);
     try {
       const entries = await extractBookStructure(pdf, (page, count) => setStructureProgress(Math.round(page / count * 100)));
-      const updated = { ...targetDocument, bookStructure: entries, bookStructureScannedAt: new Date().toISOString(), bookStructureVersion: BOOK_STRUCTURE_VERSION, updatedAt: new Date().toISOString() };
+      const updated = { ...targetDocument, bookStructure: entries, bookStructureScannedAt: new Date().toISOString(), bookStructureVersion: BOOK_STRUCTURE_VERSION, bookStructureImportedFrom: undefined, bookStructureImportMode: undefined, updatedAt: new Date().toISOString() };
       await putDocument(updated);
       setDocument(updated); setBookStructure(entries); setStructureState(entries.length ? "ready" : "empty");
     } catch {
@@ -816,6 +825,8 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
       bookStructure: undefined,
       bookStructureScannedAt: undefined,
       bookStructureVersion: undefined,
+      bookStructureImportedFrom: undefined,
+      bookStructureImportMode: undefined,
       updatedAt: new Date().toISOString(),
     };
     try {
@@ -824,6 +835,60 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
       if (enabled && pdfDocumentRef.current) await readBookStructure(pdfDocumentRef.current, updated);
     } catch (cause) {
       setError(message(cause, "The textbook setting could not be saved."));
+    }
+  }
+  async function chooseBookmarkSource(file?: File) {
+    if (!file || !document) return;
+    if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
+      setError("Choose a PDF file that contains the bookmarks you want to use.");
+      return;
+    }
+    if (file.size > MAX_PDF_SIZE) {
+      setError("The bookmark source PDF is over 120 MB.");
+      return;
+    }
+    setBookmarkImporting(true); setBookmarkImportPreview(null); setError("");
+    let donorPdf: { numPages: number; destroy?: () => Promise<void> } | null = null;
+    try {
+      const data = await file.arrayBuffer();
+      donorPdf = await pdfjs.getDocument({ data: data.slice(0) }).promise;
+      const entries = await extractBookmarkStructure(donorPdf as Parameters<typeof extractBookmarkStructure>[0]);
+      if (!entries.length) throw new Error("This PDF has no usable bookmarks.");
+      const mode = donorPdf.numPages === document.pageCount ? "exact" : "proportional";
+      setBookmarkImportPreview({
+        fileName: file.name,
+        sourcePageCount: donorPdf.numPages,
+        mappedEntries: mapBookmarkStructure(entries, donorPdf.numPages, document.pageCount),
+        mode,
+      });
+    } catch (cause) {
+      const detail = message(cause, "The bookmark source PDF could not be read.");
+      setError(/password/i.test(detail) ? "The bookmark source PDF is password-protected." : detail);
+    } finally {
+      await donorPdf?.destroy?.().catch(() => undefined);
+      setBookmarkImporting(false);
+      if (bookmarkImportInputRef.current) bookmarkImportInputRef.current.value = "";
+    }
+  }
+  async function applyImportedBookmarks() {
+    if (!document || !bookmarkImportPreview) return;
+    const now = new Date().toISOString();
+    const updated: LocalDocument = {
+      ...document,
+      treatAsTextbook: true,
+      bookStructure: bookmarkImportPreview.mappedEntries,
+      bookStructureScannedAt: now,
+      bookStructureVersion: BOOK_STRUCTURE_VERSION,
+      bookStructureImportedFrom: bookmarkImportPreview.fileName,
+      bookStructureImportMode: bookmarkImportPreview.mode,
+      updatedAt: now,
+    };
+    try {
+      await putDocument(updated);
+      setDocument(updated); setBookStructure(updated.bookStructure ?? []); setStructureState("ready"); setStructureProgress(0);
+      setBookmarkImportPreview(null);
+    } catch (cause) {
+      setError(message(cause, "The imported bookmarks could not be saved."));
     }
   }
   function update(id: string, changes: Partial<AnnotationRecord>) {
@@ -1059,7 +1124,8 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
 
   return <main className={`reader-shell ${sidebarOpen ? "sidebar-is-open" : ""} ${resizingSidebar ? "is-resizing-sidebar" : ""}`} style={readerStyle}>
     <header className="reader-header desktop-drag-region"><button className="brand compact desktop-back-brand" onClick={onBack}><span className="brand-mark">M</span><span>MathMargin</span></button><div className="reader-title"><strong>{document.title}</strong><span>{document.pageCount} pages · stored locally</span></div><div className="save-indicator" data-state={saveState}><span />{saveState === "saving" ? "Saving…" : saveState === "error" ? "Not saved" : "Saved"}</div></header>
-    <div className="reader-toolbar"><div className="tool-group"><button className={tool === "highlight" ? "active" : ""} onClick={() => { setTool("highlight"); setDraftArea(null); }}><span className="tool-icon">T</span> Highlight</button><button className={tool === "area" ? "active" : ""} onClick={() => setTool("area")}><span className="tool-icon rectangle-icon" /> Area</button></div><div className="page-controls"><button onClick={() => setPageNumber((page) => Math.max(1, page - 1))} disabled={pageNumber === 1}>←</button><input value={pageNumber} onChange={(event) => setPageNumber(clamp(Number(event.target.value) || 1, 1, document.pageCount))} /><span>of {document.pageCount}</span><button onClick={() => setPageNumber((page) => Math.min(document.pageCount, page + 1))} disabled={pageNumber === document.pageCount}>→</button></div><div className="zoom-controls" title="Pinch on a touchpad or hold Ctrl while using the mouse wheel"><button onClick={() => setZoom((value) => Math.max(.5, value - .1))}>−</button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom((value) => Math.min(3, value + .1))}>+</button></div><button className={`reader-textbook-toggle ${treatsDocumentAsTextbook(document) ? "active" : ""}`} onClick={() => void setReaderTextbookTreatment(!treatsDocumentAsTextbook(document))} disabled={structureState === "scanning"} title="Use PDF bookmarks for chapters and sections when available; otherwise detect headings from page text"><span>§</span>{treatsDocumentAsTextbook(document) ? "Textbook structure on" : "Treat as textbook"}</button><button className="notes-toggle" onClick={() => setSidebarOpen((value) => !value)}><span>✦</span> Notes <b>{annotations.length}</b></button></div>
+    <input ref={bookmarkImportInputRef} className="bookmark-import-input" type="file" accept="application/pdf,.pdf" onChange={(event) => void chooseBookmarkSource(event.target.files?.[0])} />
+    <div className="reader-toolbar"><div className="tool-group"><button className={tool === "highlight" ? "active" : ""} onClick={() => { setTool("highlight"); setDraftArea(null); }}><span className="tool-icon">T</span> Highlight</button><button className={tool === "area" ? "active" : ""} onClick={() => setTool("area")}><span className="tool-icon rectangle-icon" /> Area</button></div><div className="page-controls"><button onClick={() => setPageNumber((page) => Math.max(1, page - 1))} disabled={pageNumber === 1}>←</button><input value={pageNumber} onChange={(event) => setPageNumber(clamp(Number(event.target.value) || 1, 1, document.pageCount))} /><span>of {document.pageCount}</span><button onClick={() => setPageNumber((page) => Math.min(document.pageCount, page + 1))} disabled={pageNumber === document.pageCount}>→</button></div><div className="zoom-controls" title="Pinch on a touchpad or hold Ctrl while using the mouse wheel"><button onClick={() => setZoom((value) => Math.max(.5, value - .1))}>−</button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom((value) => Math.min(3, value + .1))}>+</button></div><div className="structure-toolbar-actions"><button className={`reader-textbook-toggle ${treatsDocumentAsTextbook(document) ? "active" : ""}`} onClick={() => void setReaderTextbookTreatment(!treatsDocumentAsTextbook(document))} disabled={structureState === "scanning"} title="Use PDF bookmarks for chapters and sections when available; otherwise detect headings from page text"><span>§</span>{treatsDocumentAsTextbook(document) ? "Textbook structure on" : "Treat as textbook"}</button><button className="bookmark-import-button" onClick={() => bookmarkImportInputRef.current?.click()} disabled={bookmarkImporting} title="Extract bookmarks from another local version of this PDF"><span>☷</span>{bookmarkImporting ? "Reading bookmarks…" : "Import bookmarks"}</button></div><button className="notes-toggle" onClick={() => setSidebarOpen((value) => !value)}><span>✦</span> Notes <b>{annotations.length}</b></button></div>
     <div className="reader-body" style={readerBodyStyle}><section className="pdf-stage" ref={pdfStageRef}><div className="tool-tip">{tool === "highlight" ? "Select text to add a note" : "Drag over a formula, figure, or passage"} · Pinch or Ctrl+wheel to zoom</div><Document file={pdfUrl} loading={<div className="pdf-loading"><span className="spinner" /> Rendering page…</div>} onLoadSuccess={(pdf) => { const loadedPdf = pdf as unknown as Parameters<typeof extractBookStructure>[0]; pdfDocumentRef.current = loadedPdf; void readBookStructure(loadedPdf); }} onLoadError={(cause) => setError(message(cause, "The PDF could not be rendered."))}><div className="pdf-page-wrap" ref={pageRef} onMouseUp={selectText}><Page pageNumber={pageNumber} width={Math.round(760 * zoom)} renderAnnotationLayer={false} renderTextLayer />
       <div className="annotation-layer">
         {pageAnnotations.flatMap((annotation) => (isTextGeometry(annotation.geometry) ? annotation.geometry.rects : [annotation.geometry]).map((rect, index) => <button key={`${annotation.id}-${index}`} type="button" aria-label={`Open ${annotation.type === "area" ? "area" : "highlight"} annotation on page ${annotation.pageNumber}`} title="Open annotation" className={`annotation-mark ${annotation.type} color-${annotation.color} ${selectedId === annotation.id ? "selected" : ""}`} style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }} onClick={(event) => { event.stopPropagation(); setSelectedId(annotation.id); setSidebarOpen(true); }} />))}
@@ -1085,7 +1151,8 @@ function DesktopReader({ documentId, isActive, onBack }: { documentId: string; i
           {linkedAnnotations.length > 0 && <div className="annotation-linked-list">{linkedAnnotations.map((annotation) => <div className="annotation-linked-item" key={annotation.id}><button type="button" onClick={() => openLinkedAnnotation(annotation)}><span>{documentTitles.get(annotation.documentId) ?? (annotation.documentId === documentId ? document.title : "Another PDF")}</span><strong>{annotationDescription(annotation)}</strong><small>Page {annotation.pageNumber} · {annotation.type}</small></button><button type="button" className="unlink-annotation" aria-label={`Unlink ${annotationDescription(annotation)}`} title="Unlink annotation" onClick={() => unlinkAnnotations(annotation.id)}>×</button></div>)}</div>}
           {linkPickerOpen && <div className="annotation-link-picker"><label htmlFor="annotation-link-search">Look up an annotation</label><input id="annotation-link-search" value={linkSearch} onChange={(event) => setLinkSearch(event.target.value)} placeholder="Search by annotation name, note, or PDF…" />{linkLibraryState === "loading" ? <div className="link-picker-status"><span className="spinner" /> Loading annotations…</div> : linkLibraryState === "error" ? <div className="link-picker-status error">Annotations could not be loaded.</div> : <div className="link-candidate-list">{linkCandidates.map((annotation) => { const linked = selected.linkedAnnotationIds?.includes(annotation.id); return <button type="button" key={annotation.id} data-document-id={annotation.documentId} data-annotation-type={annotation.type} data-annotation-name={annotation.title?.trim() ?? ""} className={linked ? "linked" : ""} onClick={() => linked ? unlinkAnnotations(annotation.id) : linkAnnotations(annotation)}><span>{documentTitles.get(annotation.documentId) ?? "Unknown PDF"}</span><strong>{annotation.title?.trim() || annotationDescription(annotation)}</strong><small>Page {annotation.pageNumber} · {annotation.type}<b>{linked ? "Unlink" : "Link"}</b></small></button>; })}{!linkCandidates.length && linkLibraryState === "ready" && <div className="link-picker-status">No matching annotation names or notes.</div>}</div>}</div>}
         </section>
-        <label className="editor-label">Your note <span>Obsidian-style live editing</span></label><div className="note-input-tools"><div className="latex-suite-status" title="Your active Obsidian LaTeX Suite snippet set is enabled. Automatic snippets expand as you type; press Tab for manual snippets and placeholder navigation."><span>⌨</span> LaTeX Suite · {LATEX_SUITE_SHORTCUT_COUNT} shortcuts · Tab to expand</div><button type="button" className="insert-callout-button" onClick={insertCallout} title="Insert an Obsidian-style note callout">＋ Callout</button></div><LiveNoteEditor key={selected.id} value={selected.bodyMarkdown} onChange={editNote} viewRef={liveEditorViewRef} macros={KATEX_MACROS} />{latexError && <div className="latex-error"><strong>LaTeX needs attention</strong>{latexError}</div>}<div className="editor-footer"><span>{selected.bodyMarkdown.length.toLocaleString()} characters</span><button className="delete-note" onClick={() => discard(selected.id)}>Delete annotation</button></div></div> : <div className="notes-list">{!treatsDocumentAsTextbook(document) && <div className="structure-status structure-off"><div><strong>Chapter detection is off</strong><span>Turn it on to organize this PDF using bookmarks first, then detected headings when bookmarks are unavailable.</span></div><button type="button" onClick={() => void setReaderTextbookTreatment(true)}>Treat as textbook</button></div>}{treatsDocumentAsTextbook(document) && structureState === "scanning" && <div className="structure-status"><span className="spinner" /> Reading PDF bookmarks and headings{structureProgress ? ` · ${structureProgress}%` : "…"}</div>}{treatsDocumentAsTextbook(document) && structureState === "ready" && structureSource && <div className={`structure-status structure-source ${structureSource}`} data-structure-source={structureSource}>{structureSource === "outline" ? "Using this PDF’s bookmarks for chapters and sections." : "No usable PDF bookmarks found; using detected page headings."}</div>}{treatsDocumentAsTextbook(document) && structureState === "error" && <div className="structure-status warning">Chapter detection could not finish. Notes are still grouped by page.</div>}{treatsDocumentAsTextbook(document) && structureState === "empty" && <div className="structure-status">No PDF bookmarks or chapter headings were found.</div>}{annotationGroups.length ? annotationGroups.map((chapter) => <section className="annotation-chapter" key={chapter.key}><button type="button" className="annotation-chapter-heading" data-page-number={chapter.pageNumber} onClick={() => setPageNumber(chapter.pageNumber)} title={`Go to page ${chapter.pageNumber}`}><strong>{chapter.number ? `Chapter ${chapter.number} · ` : ""}{structureTitle(chapter.title, chapter.number, 0)}</strong><span>{chapter.sections.reduce((total, section) => total + section.annotations.length, 0)}</span></button>{chapter.sections.map((section) => <div className="annotation-section" key={section.key}><button type="button" className="annotation-section-heading" data-page-number={section.pageNumber} onClick={() => setPageNumber(section.pageNumber)} title={`Go to page ${section.pageNumber}`}><span>{section.number ? `Section ${section.number} · ` : ""}{structureTitle(section.title, section.number, 1)}</span><small>{section.annotations.length} {section.annotations.length === 1 ? "note" : "notes"}</small></button>{section.annotations.map((annotation) => <button className="note-card" key={annotation.id} onClick={() => { setSelectedId(annotation.id); setPageNumber(annotation.pageNumber); }}><span className={`note-stripe ${annotation.color}`} /><span className="note-card-copy"><span className="note-card-meta">Page {annotation.pageNumber} · {annotation.type}</span><strong>{annotation.title?.trim() || annotation.bodyMarkdown || annotation.selectedText || "Untitled annotation"}</strong></span><span>→</span></button>)}{!section.annotations.length && <div className="empty-section-notes">No notes in this section</div>}</div>)}{!chapter.sections.length && <div className="empty-section-notes chapter-empty">No sections or notes yet</div>}</section>) : <div className="notes-empty"><div>∴</div><h3>No annotations yet</h3><p>Select text or draw an area on the page. Your note will open here.</p></div>}</div>}</aside>
+        <label className="editor-label">Your note <span>Obsidian-style live editing</span></label><div className="note-input-tools"><div className="latex-suite-status" title="Your active Obsidian LaTeX Suite snippet set is enabled. Automatic snippets expand as you type; press Tab for manual snippets and placeholder navigation."><span>⌨</span> LaTeX Suite · {LATEX_SUITE_SHORTCUT_COUNT} shortcuts · Tab to expand</div><button type="button" className="insert-callout-button" onClick={insertCallout} title="Insert an Obsidian-style note callout">＋ Callout</button></div><LiveNoteEditor key={selected.id} value={selected.bodyMarkdown} onChange={editNote} viewRef={liveEditorViewRef} macros={KATEX_MACROS} />{latexError && <div className="latex-error"><strong>LaTeX needs attention</strong>{latexError}</div>}<div className="editor-footer"><span>{selected.bodyMarkdown.length.toLocaleString()} characters</span><button className="delete-note" onClick={() => discard(selected.id)}>Delete annotation</button></div></div> : <div className="notes-list">{!treatsDocumentAsTextbook(document) && <div className="structure-status structure-off"><div><strong>Chapter detection is off</strong><span>Turn it on to organize this PDF using bookmarks first, then detected headings when bookmarks are unavailable.</span></div><button type="button" onClick={() => void setReaderTextbookTreatment(true)}>Treat as textbook</button></div>}{treatsDocumentAsTextbook(document) && structureState === "scanning" && <div className="structure-status"><span className="spinner" /> Reading PDF bookmarks and headings{structureProgress ? ` · ${structureProgress}%` : "…"}</div>}{treatsDocumentAsTextbook(document) && structureState === "ready" && structureSource && <div className={`structure-status structure-source ${structureSource}`} data-structure-source={structureSource}>{structureSource === "outline" ? (document.bookStructureImportedFrom ? `Using bookmarks imported from ${document.bookStructureImportedFrom}${document.bookStructureImportMode === "proportional" ? " with proportional page mapping" : ""}.` : "Using this PDF’s bookmarks for chapters and sections.") : "No usable PDF bookmarks found; using detected page headings."}</div>}{treatsDocumentAsTextbook(document) && structureState === "error" && <div className="structure-status warning">Chapter detection could not finish. Notes are still grouped by page.</div>}{treatsDocumentAsTextbook(document) && structureState === "empty" && <div className="structure-status">No PDF bookmarks or chapter headings were found.</div>}{annotationGroups.length ? annotationGroups.map((chapter) => <section className="annotation-chapter" key={chapter.key}><button type="button" className="annotation-chapter-heading" data-page-number={chapter.pageNumber} onClick={() => setPageNumber(chapter.pageNumber)} title={`Go to page ${chapter.pageNumber}`}><strong>{chapter.number ? `Chapter ${chapter.number} · ` : ""}{structureTitle(chapter.title, chapter.number, 0)}</strong><span>{chapter.sections.reduce((total, section) => total + section.annotations.length, 0)}</span></button>{chapter.sections.map((section) => <div className="annotation-section" key={section.key}><button type="button" className="annotation-section-heading" data-page-number={section.pageNumber} onClick={() => setPageNumber(section.pageNumber)} title={`Go to page ${section.pageNumber}`}><span>{section.number ? `Section ${section.number} · ` : ""}{structureTitle(section.title, section.number, 1)}</span><small>{section.annotations.length} {section.annotations.length === 1 ? "note" : "notes"}</small></button>{section.annotations.map((annotation) => <button className="note-card" key={annotation.id} onClick={() => { setSelectedId(annotation.id); setPageNumber(annotation.pageNumber); }}><span className={`note-stripe ${annotation.color}`} /><span className="note-card-copy"><span className="note-card-meta">Page {annotation.pageNumber} · {annotation.type}</span><strong>{annotation.title?.trim() || annotation.bodyMarkdown || annotation.selectedText || "Untitled annotation"}</strong></span><span>→</span></button>)}{!section.annotations.length && <div className="empty-section-notes">No notes in this section</div>}</div>)}{!chapter.sections.length && <div className="empty-section-notes chapter-empty">No sections or notes yet</div>}</section>) : <div className="notes-empty"><div>∴</div><h3>No annotations yet</h3><p>Select text or draw an area on the page. Your note will open here.</p></div>}</div>}</aside>
     </div>
+    {bookmarkImportPreview && <div className="library-modal-backdrop"><section className="library-modal bookmark-import-dialog" role="dialog" aria-modal="true" aria-labelledby="bookmark-import-dialog-title"><button type="button" className="modal-close-button" onClick={() => setBookmarkImportPreview(null)} aria-label="Cancel bookmark import">×</button><p className="eyebrow">Borrow another edition’s outline</p><h2 id="bookmark-import-dialog-title">Apply bookmarks from “{bookmarkImportPreview.fileName}”?</h2><p className="folder-dialog-copy">MathMargin found {bookmarkImportPreview.mappedEntries.length} bookmarks: {bookmarkImportPreview.mappedEntries.filter((entry) => entry.level === 0).length} chapters and {bookmarkImportPreview.mappedEntries.filter((entry) => entry.level === 1).length} sections.</p><div className={`bookmark-mapping-summary ${bookmarkImportPreview.mode}`}><strong>{bookmarkImportPreview.mode === "exact" ? "Exact page mapping" : "Different page counts"}</strong><span>Source PDF: {bookmarkImportPreview.sourcePageCount} pages · Current PDF: {document.pageCount} pages</span><p>{bookmarkImportPreview.mode === "exact" ? "Page counts match, so every bookmark destination will be copied exactly." : "Bookmark destinations will be mapped proportionally from the source edition to this PDF. After applying, click several headings to check their pages."}</p></div><p className="bookmark-local-note">The selected source PDF is read locally only. It is not added to your MathMargin library or stored separately.</p><div className="modal-actions"><button type="button" onClick={() => setBookmarkImportPreview(null)}>Cancel</button><button type="button" className="confirm-bookmark-import-button" onClick={() => void applyImportedBookmarks()}>Apply bookmarks</button></div></section></div>}
   </main>;
 }

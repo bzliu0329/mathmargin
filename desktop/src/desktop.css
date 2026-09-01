@@ -111,6 +111,12 @@ body { -webkit-font-smoothing: antialiased; }
 .library-modal-backdrop { position: fixed; z-index: 200; inset: 0; display: grid; place-items: center; padding: 2rem; background: rgba(26,34,31,.46); backdrop-filter: blur(4px); }
 .library-modal { position: relative; width: min(35rem, calc(100vw - 4rem)); padding: 1.65rem; border: 1px solid #d1d8d3; border-radius: .9rem; background: #fbfbf8; box-shadow: 0 24px 70px rgba(18,27,23,.22); }
 .library-modal h2 { margin: .25rem 0 .35rem; color: var(--ink); font: 500 1.55rem/1.2 var(--font-newsreader), serif; }
+.bookmark-mapping-summary { display: grid; gap: .32rem; margin: 1rem 0; padding: .8rem .9rem; border: 1px solid #bfd2c7; border-radius: .62rem; background: #f0f6f2; color: #40574c; }
+.bookmark-mapping-summary.proportional { border-color: #dfc982; background: #fff8e6; color: #67562a; }
+.bookmark-mapping-summary strong { font-size: .75rem; }
+.bookmark-mapping-summary span { font-size: .64rem; font-weight: 700; }
+.bookmark-mapping-summary p { margin: .15rem 0 0; font-size: .65rem; line-height: 1.5; }
+.bookmark-local-note { margin: .75rem 0 0; color: #6e7a74; font-size: .62rem; line-height: 1.5; }
 .modal-close-button { position: absolute; top: .85rem; right: .85rem; width: 2rem; height: 2rem; border: 0; border-radius: 50%; background: #edf0ed; color: #68756f; cursor: pointer; font-size: 1rem; }
 .upload-file-name { max-width: calc(100% - 2.5rem); margin: 0 0 1.15rem; overflow: hidden; color: #75817b; font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
 .textbook-treatment-option { display: grid; grid-template-columns: auto 2.5rem minmax(0, 1fr); align-items: center; gap: .75rem; padding: .9rem 1rem; border: 1px solid #d2dad5; border-radius: .7rem; background: white; color: var(--ink); cursor: pointer; }
@@ -208,10 +214,13 @@ button, a, input, textarea, label { -webkit-app-region: no-drag; }
 .reader-shell { height: 100%; }
 .reader-body { height: calc(100% - 7.45rem); }
 .reader-toolbar { grid-template-columns: auto auto auto minmax(8rem, auto) auto; gap: .55rem; }
-.reader-textbook-toggle { height: 2.2rem; display: inline-flex; align-items: center; justify-content: center; gap: .38rem; padding: 0 .65rem; border: 1px solid #d0d7d2; border-radius: .42rem; background: white; color: #56645d; cursor: pointer; font-size: .62rem; font-weight: 700; white-space: nowrap; }
-.reader-textbook-toggle span { color: #567766; font: 700 .85rem/1 var(--font-newsreader), serif; }
+.bookmark-import-input { display: none; }
+.structure-toolbar-actions { display: flex; align-items: center; gap: .35rem; min-width: 0; }
+.reader-textbook-toggle, .bookmark-import-button { height: 2.2rem; display: inline-flex; align-items: center; justify-content: center; gap: .38rem; padding: 0 .65rem; border: 1px solid #d0d7d2; border-radius: .42rem; background: white; color: #56645d; cursor: pointer; font-size: .62rem; font-weight: 700; white-space: nowrap; }
+.reader-textbook-toggle span, .bookmark-import-button span { color: #567766; font: 700 .85rem/1 var(--font-newsreader), serif; }
 .reader-textbook-toggle.active { border-color: #9fb7aa; background: #e7f0ea; color: #37614f; }
-.reader-textbook-toggle:disabled { opacity: .65; cursor: progress; }
+.reader-textbook-toggle:disabled, .bookmark-import-button:disabled { opacity: .65; cursor: progress; }
+.bookmark-import-button:hover:not(:disabled) { border-color: #9fb7aa; background: #f1f6f3; color: #37614f; }
 .tool-tip { top: 10.75rem; }
 .annotation-name-label { display: block; margin: 1rem 0 .35rem; color: var(--muted); font-size: calc(.7rem * var(--notes-font-scale, 1)); font-weight: 750; }
 .annotation-name-input { width: 100%; margin-bottom: .75rem; padding: .58rem .65rem; border: 1px solid #cfd6d1; border-radius: .45rem; outline: none; background: white; color: var(--ink); font: 600 calc(.8rem * var(--notes-font-scale, 1))/1.25 var(--font-geist-sans), sans-serif; }
@@ -287,7 +296,7 @@ button, a, input, textarea, label { -webkit-app-region: no-drag; }
 .structure-off strong { color: #3f5f51; font-size: calc(.67rem * var(--notes-font-scale, 1)); }
 .structure-off span { color: #6f7d75; }
 .structure-off button { flex: none; padding: .4rem .55rem; border: 1px solid #9db4a8; border-radius: .35rem; background: white; color: #3d6955; cursor: pointer; font-size: calc(.58rem * var(--notes-font-scale, 1)); font-weight: 750; }
-@media (max-width: 980px) { .reader-textbook-toggle { width: 2.2rem; padding: 0; overflow: hidden; font-size: 0; }.reader-textbook-toggle span { font-size: .85rem; } .reader-toolbar { grid-template-columns: auto auto auto auto auto; } }
+@media (max-width: 980px) { .reader-textbook-toggle, .bookmark-import-button { width: 2.2rem; padding: 0; overflow: hidden; font-size: 0; }.reader-textbook-toggle span, .bookmark-import-button span { font-size: .85rem; } .reader-toolbar { grid-template-columns: auto auto auto auto auto; } }
 .notes-panel .annotation-chapter-heading strong { font-size: calc(.92rem * var(--notes-font-scale, 1)); }
 .notes-panel .annotation-section-heading > span { font-size: calc(.76rem * var(--notes-font-scale, 1)); }
 .notes-panel .annotation-section-heading small { font-size: calc(.55rem * var(--notes-font-scale, 1)); }

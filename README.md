@@ -19,6 +19,7 @@ MathMargin is a local-first PDF reader for mathematical notes, books, papers, an
 - LaTeX Suite-compatible shortcuts and snippet expansion
 - Obsidian callouts such as `> [!note]`, `> [!tip]`, and `> [!warning]`
 - Optional **Treat as textbook** mode that uses PDF bookmarks first and falls back to page-heading detection, with annotation counts
+- Local bookmark transfer from another edition of the same PDF, with an exact-page preview or an explicit proportional mapping warning when page counts differ
 - Named annotations with debounced local autosave using IndexedDB
 - Windows portable desktop packaging through Electron
 
@@ -50,7 +51,7 @@ npx tsc --noEmit
 npm run desktop:bundle
 ```
 
-The Electron smoke-test harness in `desktop/electron-main.cjs` validates PDF upload and reopening, PDF rendering and zooming, live LaTeX editing, LaTeX Suite shortcuts, callouts, autosave scrolling, chapter grouping, clickable overlays, box moving/resizing/options/deletion, and annotation linking.
+The Electron smoke-test harness in `desktop/electron-main.cjs` validates PDF upload and reopening, PDF rendering and zooming, external bookmark transfer, live LaTeX editing, LaTeX Suite shortcuts, callouts, autosave scrolling, chapter grouping, clickable overlays, box moving/resizing/options/deletion, and annotation linking. Unit tests separately verify exact and proportional bookmark-page mapping.
 
 ## Build the Windows app
 

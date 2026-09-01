@@ -58,6 +58,8 @@ test("keeps desktop PDF folders and optional textbook treatment persistent", asy
   assert.match(types, /treatAsTextbook\?: boolean/);
   assert.match(types, /folderId\?: string \| null/);
   assert.match(types, /parentFolderId\?: string \| null/);
+  assert.match(types, /bookStructureImportedFrom\?: string/);
+  assert.match(types, /bookStructureImportMode\?: "exact" \| "proportional"/);
   assert.match(storage, /createObjectStore\("folders"/);
   assert.match(storage, /export async function removeFolder/);
   assert.match(storage, /removedDocumentIds/);
@@ -104,7 +106,13 @@ test("keeps desktop PDF folders and optional textbook treatment persistent", asy
   assert.match(desktop, /name === normalizedLinkSearch/);
   assert.match(desktop, /data-structure-source/);
   assert.match(desktop, /Using this PDF’s bookmarks/);
+  assert.match(desktop, /bookmark-import-input/);
+  assert.match(desktop, /bookmark-import-dialog/);
+  assert.match(desktop, /confirm-bookmark-import-button/);
+  assert.match(desktop, /not added to your MathMargin library or stored separately/i);
   const structure = await readFile(new URL("desktop/src/bookStructure.ts", root), "utf8");
   assert.match(structure, /BOOK_STRUCTURE_VERSION = 4/);
-  assert.match(structure, /outline\.length \? outline : await inferFromText/);
+  assert.match(structure, /extractBookmarkStructure/);
+  assert.match(structure, /mapBookmarkStructure/);
+  assert.match(structure, /outline\.length \? outline : numberStructure/);
 });

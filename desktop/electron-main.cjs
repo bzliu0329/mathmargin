@@ -17,6 +17,7 @@ protocol.registerSchemesAsPrivileged([{
 
 const smokeArgument = process.argv.find((argument) => argument.startsWith("--smoke-test="));
 const smokePdfPath = smokeArgument ? smokeArgument.slice("--smoke-test=".length) : "";
+if (smokePdfPath) app.setPath("userData", path.join(app.getPath("temp"), `mathmargin-smoke-${process.pid}`));
 
 function registerAppProtocol(targetProtocol) {
   const appRoot = path.resolve(__dirname, "..", "desktop-dist");
@@ -316,6 +317,21 @@ async function runUploadSmokeTest(window) {
         if (!document.querySelector('[data-structure-source="outline"]') || !document.querySelector(".structure-source")?.textContent?.includes("PDF’s bookmarks")) {
           return { ok: false, uploaded: true, rendered: true, chapterGrouping: true, error: "The PDF outline was not preferred for textbook structure." };
         }
+        const bookmarkImportInput = document.querySelector(".bookmark-import-input");
+        if (!bookmarkImportInput || !document.querySelector(".bookmark-import-button")) return { ok: false, uploaded: true, rendered: true, chapterGrouping: true, error: "The bookmark-import action was not available in the reader." };
+        const donorName = "bookmark-source-" + smokeToken + ".pdf";
+        const donorTransfer = new DataTransfer();
+        donorTransfer.items.add(new File([bytes], donorName, { type: "application/pdf" }));
+        Object.defineProperty(bookmarkImportInput, "files", { configurable: true, value: donorTransfer.files });
+        bookmarkImportInput.dispatchEvent(new Event("change", { bubbles: true }));
+        const bookmarkPreviewStartedAt = Date.now();
+        while (!document.querySelector(".bookmark-import-dialog") && Date.now() - bookmarkPreviewStartedAt < 10000) await new Promise(resolve => setTimeout(resolve, 100));
+        const bookmarkDialog = document.querySelector(".bookmark-import-dialog");
+        if (!bookmarkDialog?.textContent?.includes("Exact page mapping") || !bookmarkDialog.textContent.includes("not added to your MathMargin library")) return { ok: false, uploaded: true, rendered: true, chapterGrouping: true, error: "The bookmark import did not preview exact mapping and local-only handling." };
+        document.querySelector(".confirm-bookmark-import-button")?.click();
+        const bookmarkAppliedAt = Date.now();
+        while ((!document.querySelector(".structure-source")?.textContent?.includes(donorName) || document.querySelector(".bookmark-import-dialog")) && Date.now() - bookmarkAppliedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
+        if (!document.querySelector(".structure-source")?.textContent?.includes(donorName) || !document.querySelector('[data-structure-source="outline"]')) return { ok: false, uploaded: true, rendered: true, chapterGrouping: true, error: "Imported bookmarks were not saved as the current PDF structure." };
         const emptySectionCounts = [...document.querySelectorAll(".annotation-section-heading small")].filter(element => element.textContent?.trim() === "0 notes");
         if (!emptySectionCounts.length || !document.querySelector(".empty-section-notes")) {
           return { ok: false, uploaded: true, rendered: true, shortcuts: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, chapterGrouping: true, error: "Detected sections without annotations were hidden from All annotations." };
@@ -521,7 +537,7 @@ async function runUploadSmokeTest(window) {
         while (document.querySelector(".books-section h2")?.textContent === importFolderName && Date.now() - importFolderCleanupStartedAt < 5000) await new Promise(resolve => setTimeout(resolve, 100));
         const importedPdfStillVisible = [...document.querySelectorAll(".book-card")].some(card => card.textContent?.includes("imported-" + smokeToken));
         const importedFolderStillVisible = [...document.querySelectorAll(".library-folder-tile")].some(tile => tile.textContent?.includes(importFolderName));
-        return { ok: !importedPdfStillVisible && !importedFolderStillVisible, bookmarkStructurePreferred: true, liveCrossBookAnnotations: true, annotationNameLookup: true, unfiledDefault: true, allPdfsRemoved: true, movedPdfLeavesUnfiled: true, folderCreated: true, folderRenamed: true, folderDeleted: true, folderCascadeDelete: true, folderImport: true, recursiveFolderImport: true, subfolderHierarchy: true, nestedFolderNavigation: true, hierarchicalCascadeDelete: true, folderImportTextbookOption: true, multiSelection: true, bulkTextbookAction: true, selectedPdfMoved: true, folderIconVisible: true, folderIconOpened: true, explorerToolbar: true, explorerAddressBar: true, explorerSearch: true, explorerLayoutToggle: true, treatAsTextbookOption: true, readerTextbookToggle: true, textbookStructureSaved: true, assignedByDrag: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: true, folderCleanedUp: true };
+        return { ok: !importedPdfStillVisible && !importedFolderStillVisible, externalBookmarkImport: true, bookmarkStructurePreferred: true, liveCrossBookAnnotations: true, annotationNameLookup: true, unfiledDefault: true, allPdfsRemoved: true, movedPdfLeavesUnfiled: true, folderCreated: true, folderRenamed: true, folderDeleted: true, folderCascadeDelete: true, folderImport: true, recursiveFolderImport: true, subfolderHierarchy: true, nestedFolderNavigation: true, hierarchicalCascadeDelete: true, folderImportTextbookOption: true, multiSelection: true, bulkTextbookAction: true, selectedPdfMoved: true, folderIconVisible: true, folderIconOpened: true, explorerToolbar: true, explorerAddressBar: true, explorerSearch: true, explorerLayoutToggle: true, treatAsTextbookOption: true, readerTextbookToggle: true, textbookStructureSaved: true, assignedByDrag: true, uploaded: true, reopened: true, rendered: true, zoomed: true, borderlessHighlights: true, shortcuts: true, inlineLatex: true, mathEditPreview: true, displayMath: true, resizablePanel: true, liveNoteEditor: true, autoScrollingEditor: true, obsidianCallouts: true, chapterGrouping: true, structureNavigation: true, emptySectionsVisible: true, detectedChapterTitle, detectedSectionTitle, areaResized: true, areaMoved: true, boxOptions: true, annotationsLinked: true, linkedAnnotationOpened: true, annotationClicked: true, boxDeleted: true, cleanedUp: true, folderCleanedUp: true };
       }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
