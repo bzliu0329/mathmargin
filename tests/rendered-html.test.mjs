@@ -101,6 +101,11 @@ test("keeps desktop PDF folders and optional textbook treatment persistent", asy
   assert.match(desktop, /LIVE_ANNOTATION_EVENT/);
   assert.match(desktop, /publishLiveAnnotation/);
   assert.match(desktop, /mergeLiveAnnotations/);
+  assert.match(desktop, /relatedAnnotations/);
+  assert.match(desktop, /annotationsAreLinked/);
+  assert.match(desktop, /two-way/);
+  assert.match(storage, /repairBidirectionalAnnotationLinks/);
+  assert.match(storage, /putAnnotationPair/);
   assert.match(desktop, /Search by annotation name, note, or PDF/);
   assert.match(desktop, /data-annotation-name/);
   assert.match(desktop, /name === normalizedLinkSearch/);

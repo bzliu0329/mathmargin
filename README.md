@@ -13,7 +13,7 @@ MathMargin is a local-first PDF reader for mathematical notes, books, papers, an
 - Selectable PDF text, page navigation, and touchpad/Ctrl-wheel zoom
 - Text highlights and movable, resizable area annotations anchored through zoom changes
 - Contextual box options for color, linking, and deletion
-- Bidirectional annotation links within one PDF or across different PDFs, with real-time cross-tab updates and annotation-name lookup
+- Durable two-way annotation links within one PDF or across different PDFs: opening either A or B shows and opens the other side, with real-time cross-tab updates, legacy-link repair, and annotation-name lookup
 - One Obsidian-style live note editor with inline KaTeX rendering
 - Obsidian-style floating KaTeX previews while selecting or editing math source
 - LaTeX Suite-compatible shortcuts and snippet expansion

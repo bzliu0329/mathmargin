@@ -149,6 +149,28 @@ export async function listAllAnnotations() {
   return values;
 }
 
+export async function repairBidirectionalAnnotationLinks() {
+  const database = await openDatabase();
+  const transaction = database.transaction("annotations", "readwrite");
+  const store = transaction.objectStore("annotations");
+  const annotations = await requestResult(store.getAll()) as AnnotationRecord[];
+  const byId = new Map(annotations.map((annotation) => [annotation.id, annotation]));
+  const changed = new Map<string, AnnotationRecord>();
+  const now = new Date().toISOString();
+  for (const annotation of annotations) {
+    for (const targetId of annotation.linkedAnnotationIds ?? []) {
+      if (targetId === annotation.id) continue;
+      const target = changed.get(targetId) ?? byId.get(targetId);
+      if (!target || target.linkedAnnotationIds?.includes(annotation.id)) continue;
+      changed.set(targetId, { ...target, linkedAnnotationIds: [...(target.linkedAnnotationIds ?? []), annotation.id], updatedAt: now });
+    }
+  }
+  for (const annotation of changed.values()) store.put(annotation);
+  await transactionDone(transaction);
+  database.close();
+  return annotations.map((annotation) => changed.get(annotation.id) ?? annotation);
+}
+
 export async function getAnnotation(id: string) {
   const database = await openDatabase();
   const value = await requestResult(database.transaction("annotations", "readonly").objectStore("annotations").get(id)) as AnnotationRecord | undefined;
@@ -160,6 +182,15 @@ export async function putAnnotation(annotation: AnnotationRecord) {
   const database = await openDatabase();
   const transaction = database.transaction("annotations", "readwrite");
   transaction.objectStore("annotations").put(annotation);
+  await transactionDone(transaction);
+  database.close();
+}
+
+export async function putAnnotationPair(first: AnnotationRecord, second: AnnotationRecord) {
+  const database = await openDatabase();
+  const transaction = database.transaction("annotations", "readwrite");
+  const store = transaction.objectStore("annotations");
+  store.put(first); store.put(second);
   await transactionDone(transaction);
   database.close();
 }
